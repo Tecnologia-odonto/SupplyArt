@@ -14,7 +14,7 @@ import Requests from './pages/Requests/Requests';
 import Purchases from './pages/Purchases/Purchases';
 import Financial from './pages/Financial/Financial';
 import Movements from './pages/Movements/Movements';
-import Logs from './pages/Logs/Logs';
+import Logs from './pages/Logs/Logs.tsx';
 import Users from './pages/Users/Users';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
