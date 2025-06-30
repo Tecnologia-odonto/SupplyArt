@@ -64,7 +64,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           unit:units(name)
         `)
         .not('min_quantity', 'is', null)
-        .lt('quantity', supabase.raw('min_quantity'))
+        .filter('quantity', 'lt', 'min_quantity')
         .limit(5);
 
       if (stockError) throw stockError;

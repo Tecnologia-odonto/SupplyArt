@@ -6,15 +6,15 @@ import {
   CurrencyDollarIcon,
   ArrowTrendingUpIcon,
   ArrowTrendingDownIcon,
+  ExclamationTriangleIcon,
   CalendarIcon,
-  ExclamationTriangleIcon
+  FunnelIcon
 } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
-import Button from '../../components/UI/Button';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
-import { format, startOfMonth, endOfMonth, parseISO, isValid, subDays } from 'date-fns';
+import { format, startOfMonth, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface DashboardStats {
@@ -38,24 +38,25 @@ interface ExpiryAlert {
   item_name: string;
   unit_name: string;
   quantity: number;
-  status: string;
 }
 
 interface MaintenanceAlert {
   id: string;
   item_name: string;
-  inventory_id: string;
   next_maintenance_date: string;
   days_remaining: number;
 }
 
-interface ActivityLog {
+interface RecentActivity {
   id: string;
-  action: string;
-  table_name: string;
-  created_at: string;
-  user_name: string;
   description: string;
+  user_name: string;
+  created_at: string;
+}
+
+interface Unit {
+  id: string;
+  name: string;
 }
 
 const Dashboard: React.FC = () => {
@@ -68,42 +69,42 @@ const Dashboard: React.FC = () => {
   const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
   const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlert[]>([]);
   const [maintenanceAlerts, setMaintenanceAlerts] = useState<MaintenanceAlert[]>([]);
-  const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [units, setUnits] = useState<any[]>([]);
-  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<string>(() => {
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState<string>('');
+  const [startDate, setStartDate] = useState(() => {
     return format(startOfMonth(new Date()), 'yyyy-MM-dd');
   });
-  const [endDate, setEndDate] = useState<string>(() => {
+  const [endDate, setEndDate] = useState(() => {
     return format(new Date(), 'yyyy-MM-dd');
   });
   
   const { profile } = useAuth();
   const permissions = usePermissions();
-  
-  const canFilterUnits = profile?.role && ['admin', 'gestor'].includes(profile.role);
 
   useEffect(() => {
     fetchUnits();
   }, []);
 
   useEffect(() => {
-    // Set default unit based on user profile
-    if (profile && profile.unit_id && !selectedUnitId) {
-      setSelectedUnitId(profile.unit_id);
+    if (profile) {
+      // Se o usuário for operador administrativo, selecionar automaticamente sua unidade
+      if (profile.role === 'operador-administrativo' && profile.unit_id) {
+        setSelectedUnitId(profile.unit_id);
+      }
     }
   }, [profile]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, [selectedUnitId, startDate, endDate, profile]);
+  }, [selectedUnitId, startDate, endDate]);
 
   const fetchUnits = async () => {
     try {
       const { data, error } = await supabase
         .from('units')
-        .select('*')
+        .select('id, name')
         .order('name');
 
       if (error) throw error;
@@ -114,58 +115,57 @@ const Dashboard: React.FC = () => {
   };
 
   const fetchDashboardData = async () => {
-    setLoading(true);
     try {
-      const unitId = selectedUnitId || profile?.unit_id;
-      
-      // Fetch basic stats
-      const itemsResult = await supabase.from('items').select('id', { count: 'exact', head: true });
-      
-      const unitsResult = await supabase
+      setLoading(true);
+
+      // Fetch total items
+      const { count: itemsCount, error: itemsError } = await supabase
+        .from('items')
+        .select('id', { count: 'exact', head: true });
+
+      if (itemsError) throw itemsError;
+
+      // Fetch total units
+      const { count: unitsCount, error: unitsError } = await supabase
         .from('units')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', startDate ? `${startDate}T00:00:00` : null)
-        .lte('created_at', endDate ? `${endDate}T23:59:59` : null);
-      
-      // Pending purchases - only filter by unit_id if unitId exists
+        .select('id', { count: 'exact', head: true });
+
+      if (unitsError) throw unitsError;
+
+      // Fetch pending purchases
       let purchasesQuery = supabase
         .from('purchases')
         .select('id', { count: 'exact', head: true })
         .neq('status', 'finalizado');
-      
-      if (unitId) {
-        purchasesQuery = purchasesQuery.eq('unit_id', unitId);
+
+      if (selectedUnitId) {
+        purchasesQuery = purchasesQuery.eq('unit_id', selectedUnitId);
       }
-      
-      const purchasesResult = await purchasesQuery;
-      
-      // Monthly expenses - only filter by unit_id if unitId exists
-      let expensesQuery = supabase
+
+      const { count: purchasesCount, error: purchasesError } = await purchasesQuery;
+
+      if (purchasesError) throw purchasesError;
+
+      // Fetch monthly expense
+      let expenseQuery = supabase
         .from('financial_transactions')
         .select('amount')
         .eq('type', 'expense')
-        .gte('created_at', startDate ? `${startDate}T00:00:00` : null)
-        .lte('created_at', endDate ? `${endDate}T23:59:59` : null);
-      
-      if (unitId) {
-        expensesQuery = expensesQuery.eq('unit_id', unitId);
+        .gte('created_at', `${startDate}T00:00:00`)
+        .lte('created_at', `${endDate}T23:59:59`);
+
+      if (selectedUnitId) {
+        expenseQuery = expenseQuery.eq('unit_id', selectedUnitId);
       }
-      
-      const expensesResult = await expensesQuery;
 
-      // Calculate total expenses
-      const expenses = expensesResult.data || [];
-      const totalExpense = expenses.reduce((sum, transaction) => sum + (transaction.amount || 0), 0);
+      const { data: expenses, error: expensesError } = await expenseQuery;
 
-      setStats({
-        totalItems: itemsResult.count || 0,
-        totalUnits: unitsResult.count || 0,
-        pendingPurchases: purchasesResult.count || 0,
-        monthlyExpense: totalExpense
-      });
+      if (expensesError) throw expensesError;
 
-      // Fetch stock alerts (items below minimum quantity)
-      let lowStockQuery = supabase
+      const totalExpense = expenses?.reduce((sum, transaction) => sum + transaction.amount, 0) || 0;
+
+      // Fetch stock alerts (items with quantity below min_quantity)
+      let stockAlertsQuery = supabase
         .from('stock')
         .select(`
           id,
@@ -175,108 +175,64 @@ const Dashboard: React.FC = () => {
           unit:units(name)
         `)
         .not('min_quantity', 'is', null)
-        .lt('quantity', 'min_quantity')
+        .filter('quantity', 'lt', 'min_quantity')
         .limit(5);
 
-      if (unitId) {
-        lowStockQuery = lowStockQuery.eq('unit_id', unitId);
+      if (selectedUnitId) {
+        stockAlertsQuery = stockAlertsQuery.eq('unit_id', selectedUnitId);
       }
 
-      const { data: lowStockData } = await lowStockQuery;
+      const { data: stockAlertsData, error: stockError } = await stockAlertsQuery;
 
-      if (lowStockData) {
-        setStockAlerts(
-          lowStockData.map(item => ({
-            id: item.id,
-            item_name: item.item?.name || 'Item desconhecido',
-            unit_name: item.unit?.name || 'Unidade desconhecida',
-            quantity: item.quantity || 0,
-            min_quantity: item.min_quantity || 0,
-            unit_measure: item.item?.unit_measure || 'un'
-          }))
-        );
-      }
+      if (stockError) throw stockError;
 
-      // Fetch expired inventory items
-      let expiredQuery = supabase
+      // Fetch expiry alerts (inventory items with expired status)
+      let expiryAlertsQuery = supabase
         .from('inventory')
         .select(`
           id,
           quantity,
-          status,
           item:items(name),
           unit:units(name)
         `)
         .eq('status', 'expired')
         .limit(5);
 
-      if (unitId) {
-        expiredQuery = expiredQuery.eq('unit_id', unitId);
+      if (selectedUnitId) {
+        expiryAlertsQuery = expiryAlertsQuery.eq('unit_id', selectedUnitId);
       }
 
-      const { data: expiredData } = await expiredQuery;
+      const { data: expiryAlertsData, error: expiryError } = await expiryAlertsQuery;
 
-      if (expiredData) {
-        setExpiryAlerts(
-          expiredData.map(item => ({
-            id: item.id,
-            item_name: item.item?.name || 'Item desconhecido',
-            unit_name: item.unit?.name || 'Unidade desconhecida',
-            quantity: item.quantity || 0,
-            status: item.status || 'unknown'
-          }))
-        );
-      }
+      if (expiryError) throw expiryError;
 
-      // Fetch upcoming maintenance
+      // Fetch maintenance alerts (inventory items with upcoming maintenance)
       const today = new Date();
-      const { data: maintenanceData } = await supabase
+      const { data: maintenanceAlertsData, error: maintenanceError } = await supabase
         .from('inventory_events')
         .select(`
           id,
-          inventory_id,
           next_action_date,
-          description,
           inventory:inventory(
-            item_id,
-            unit_id,
             item:items(name),
-            unit:units(name, id)
+            unit_id
           )
         `)
         .not('next_action_date', 'is', null)
-        .gte('next_action_date', today.toISOString().split('T')[0])
-        .lte('next_action_date', new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0])
+        .lte('next_action_date', format(new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'))
+        .gte('next_action_date', format(today, 'yyyy-MM-dd'))
         .order('next_action_date', { ascending: true })
         .limit(5);
 
-      if (maintenanceData) {
-        const filteredMaintenanceData = unitId 
-          ? maintenanceData.filter(item => 
-              item.inventory?.unit_id === unitId
-            )
-          : maintenanceData;
-        
-        setMaintenanceAlerts(
-          filteredMaintenanceData.map(item => {
-            const nextDate = new Date(item.next_action_date);
-            const today = new Date();
-            const diffTime = Math.abs(nextDate.getTime() - today.getTime());
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
-            return {
-              id: item.id,
-              item_name: item.inventory?.item?.name || 'Item desconhecido',
-              inventory_id: item.inventory_id,
-              next_maintenance_date: item.next_action_date,
-              days_remaining: diffDays
-            };
-          })
-        );
-      }
+      if (maintenanceError) throw maintenanceError;
 
-      // Fetch recent activity
-      const { data: activityData } = await supabase
+      // Filter maintenance alerts by unit if needed
+      const filteredMaintenanceAlerts = selectedUnitId 
+        ? maintenanceAlertsData?.filter(alert => alert.inventory.unit_id === selectedUnitId) 
+        : maintenanceAlertsData;
+
+      // Fetch recent activity from audit logs
+      let activityQuery = supabase
         .from('audit_logs')
         .select(`
           id,
@@ -285,43 +241,90 @@ const Dashboard: React.FC = () => {
           created_at,
           user:profiles(name)
         `)
+        .in('action', ['INSERT', 'UPDATE', 'DELETE', 'PURCHASE_FINALIZED', 'REQUEST_APPROVED'])
         .order('created_at', { ascending: false })
         .limit(5);
 
-      if (activityData) {
-        setRecentActivity(
-          activityData.map(log => {
-            let description = '';
-            
-            // Generate human-readable description based on action and table
-            if (log.action.includes('INSERT') || log.action.includes('CREATE')) {
-              description = `Novo registro criado em ${getTableDisplayName(log.table_name)}`;
-            } else if (log.action.includes('UPDATE')) {
-              description = `Registro atualizado em ${getTableDisplayName(log.table_name)}`;
-            } else if (log.action.includes('DELETE')) {
-              description = `Registro excluído de ${getTableDisplayName(log.table_name)}`;
-            } else if (log.action.includes('LOGIN')) {
-              description = 'Login no sistema';
-            } else if (log.action.includes('LOGOUT')) {
-              description = 'Logout do sistema';
-            } else {
-              description = `${log.action} em ${getTableDisplayName(log.table_name)}`;
-            }
-            
-            return {
-              id: log.id,
-              action: log.action,
-              table_name: log.table_name,
-              created_at: log.created_at,
-              user_name: log.user?.name || 'Sistema',
-              description
-            };
-          })
-        );
-      }
+      const { data: activityData, error: activityError } = await activityQuery;
 
+      if (activityError) throw activityError;
+
+      // Format stock alerts
+      const formattedStockAlerts = stockAlertsData?.map(alert => ({
+        id: alert.id,
+        item_name: alert.item.name,
+        unit_name: alert.unit.name,
+        quantity: alert.quantity,
+        min_quantity: alert.min_quantity,
+        unit_measure: alert.item.unit_measure
+      })) || [];
+
+      // Format expiry alerts
+      const formattedExpiryAlerts = expiryAlertsData?.map(alert => ({
+        id: alert.id,
+        item_name: alert.item.name,
+        unit_name: alert.unit.name,
+        quantity: alert.quantity
+      })) || [];
+
+      // Format maintenance alerts
+      const formattedMaintenanceAlerts = filteredMaintenanceAlerts?.map(alert => {
+        const nextDate = new Date(alert.next_action_date);
+        const daysRemaining = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        
+        return {
+          id: alert.id,
+          item_name: alert.inventory.item.name,
+          next_maintenance_date: alert.next_action_date,
+          days_remaining: daysRemaining
+        };
+      }) || [];
+
+      // Format recent activity
+      const formattedActivity = activityData?.map(activity => {
+        let description = '';
+        
+        switch (activity.action) {
+          case 'INSERT':
+            description = `Novo registro criado em ${getTableDisplayName(activity.table_name)}`;
+            break;
+          case 'UPDATE':
+            description = `Registro atualizado em ${getTableDisplayName(activity.table_name)}`;
+            break;
+          case 'DELETE':
+            description = `Registro excluído de ${getTableDisplayName(activity.table_name)}`;
+            break;
+          case 'PURCHASE_FINALIZED':
+            description = 'Compra finalizada e adicionada ao estoque';
+            break;
+          case 'REQUEST_APPROVED':
+            description = 'Pedido interno aprovado';
+            break;
+          default:
+            description = `Ação ${activity.action} em ${getTableDisplayName(activity.table_name)}`;
+        }
+        
+        return {
+          id: activity.id,
+          description,
+          user_name: activity.user?.name || 'Sistema',
+          created_at: activity.created_at
+        };
+      }) || [];
+
+      setStats({
+        totalItems: itemsCount || 0,
+        totalUnits: unitsCount || 0,
+        pendingPurchases: purchasesCount || 0,
+        monthlyExpense: totalExpense
+      });
+      
+      setStockAlerts(formattedStockAlerts);
+      setExpiryAlerts(formattedExpiryAlerts);
+      setMaintenanceAlerts(formattedMaintenanceAlerts);
+      setRecentActivity(formattedActivity);
     } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
+      console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
     }
@@ -344,58 +347,29 @@ const Dashboard: React.FC = () => {
       movements: 'Movimentações',
       financial_transactions: 'Transações Financeiras',
       unit_budgets: 'Orçamentos',
-      auth: 'Autenticação',
     };
 
     return tableNames[tableName] || tableName;
   };
 
   const formatDate = (dateString: string) => {
-    try {
-      const date = parseISO(dateString);
-      if (!isValid(date)) return '';
-      return format(date, "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString;
-    }
+    return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
 
-  const formatDateTime = (dateString: string) => {
-    try {
-      const date = parseISO(dateString);
-      if (!isValid(date)) return '';
-      return format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
-    } catch (error) {
-      console.error('Error formatting datetime:', error);
-      return dateString;
-    }
-  };
-
-  const handleQuickDateFilter = (filter: 'today' | 'thisWeek' | 'thisMonth' | 'thisYear') => {
-    const today = new Date();
+  const formatDateTime = (dateTimeString: string) => {
+    const date = parseISO(dateTimeString);
+    const now = new Date();
+    const diffInHours = Math.abs(now.getTime() - date.getTime()) / 36e5;
     
-    switch (filter) {
-      case 'today':
-        setStartDate(format(today, 'yyyy-MM-dd'));
-        setEndDate(format(today, 'yyyy-MM-dd'));
-        break;
-      case 'thisWeek':
-        const firstDayOfWeek = new Date(today);
-        firstDayOfWeek.setDate(today.getDate() - today.getDay());
-        setStartDate(format(firstDayOfWeek, 'yyyy-MM-dd'));
-        setEndDate(format(today, 'yyyy-MM-dd'));
-        break;
-      case 'thisMonth':
-        setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'));
-        setEndDate(format(today, 'yyyy-MM-dd'));
-        break;
-      case 'thisYear':
-        const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
-        setStartDate(format(firstDayOfYear, 'yyyy-MM-dd'));
-        setEndDate(format(today, 'yyyy-MM-dd'));
-        break;
+    if (diffInHours < 24) {
+      if (diffInHours < 1) {
+        const minutes = Math.floor(diffInHours * 60);
+        return `há ${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
+      }
+      return `há ${Math.floor(diffInHours)} ${Math.floor(diffInHours) === 1 ? 'hora' : 'horas'}`;
     }
+    
+    return format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
   };
 
   if (loading) {
@@ -432,7 +406,7 @@ const Dashboard: React.FC = () => {
       <Card>
         <div className="flex items-center mb-4">
           <CalendarIcon className="w-5 h-5 text-primary-600 mr-2" />
-          <h3 className="text-lg font-medium text-gray-900">Filtros</h3>
+          <h3 className="text-lg font-medium text-gray-900">Filtros do Dashboard</h3>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -468,57 +442,75 @@ const Dashboard: React.FC = () => {
             </label>
             <select
               id="unit_id"
-              value={selectedUnitId || ''}
-              onChange={(e) => setSelectedUnitId(e.target.value || null)}
-              disabled={!canFilterUnits}
+              value={selectedUnitId}
+              onChange={(e) => setSelectedUnitId(e.target.value)}
+              disabled={profile?.role === 'operador-administrativo'}
               className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                !canFilterUnits ? 'bg-gray-100' : ''
+                profile?.role === 'operador-administrativo' ? 'bg-gray-100' : ''
               }`}
             >
-              {canFilterUnits && <option value="">Todas as unidades</option>}
+              {permissions.canAccessAllUnits && (
+                <option value="">Todas as unidades</option>
+              )}
               {units.map((unit) => (
                 <option key={unit.id} value={unit.id}>
-                  {unit.name} {unit.is_cd ? '(CD)' : ''}
+                  {unit.name}
                 </option>
               ))}
             </select>
-            {!canFilterUnits && profile?.unit_id && (
+            {profile?.role === 'operador-administrativo' && (
               <p className="mt-1 text-xs text-gray-500">
-                Você só pode visualizar dados da sua unidade
+                Como operador administrativo, você só pode ver dados da sua unidade
               </p>
             )}
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleQuickDateFilter('today')}
+          <button
+            className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            onClick={() => {
+              const today = new Date();
+              setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'));
+              setEndDate(format(today, 'yyyy-MM-dd'));
+            }}
+          >
+            Mês Atual
+          </button>
+          <button
+            className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            onClick={() => {
+              const today = new Date();
+              const lastMonth = new Date(today);
+              lastMonth.setMonth(lastMonth.getMonth() - 1);
+              setStartDate(format(startOfMonth(lastMonth), 'yyyy-MM-dd'));
+              setEndDate(format(new Date(today.getFullYear(), today.getMonth(), 0), 'yyyy-MM-dd'));
+            }}
+          >
+            Mês Anterior
+          </button>
+          <button
+            className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            onClick={() => {
+              const today = new Date();
+              const lastWeek = new Date(today);
+              lastWeek.setDate(lastWeek.getDate() - 7);
+              setStartDate(format(lastWeek, 'yyyy-MM-dd'));
+              setEndDate(format(today, 'yyyy-MM-dd'));
+            }}
+          >
+            Últimos 7 dias
+          </button>
+          <button
+            className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            onClick={() => {
+              const today = new Date();
+              setStartDate(format(today, 'yyyy-MM-dd'));
+              setEndDate(format(today, 'yyyy-MM-dd'));
+            }}
           >
             Hoje
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleQuickDateFilter('thisWeek')}
-          >
-            Esta Semana
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleQuickDateFilter('thisMonth')}
-          >
-            Este Mês
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleQuickDateFilter('thisYear')}
-          >
-            Este Ano
-          </Button>
+          </button>
         </div>
       </Card>
 
@@ -541,12 +533,6 @@ const Dashboard: React.FC = () => {
                     <div
                       className="ml-2 flex items-baseline text-xs sm:text-sm font-semibold text-success-600"
                     >
-                      <ArrowTrendingUpIcon
-                        className="self-center flex-shrink-0 h-3 w-3 sm:h-4 sm:w-4 text-success-500"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Increased by</span>
-                      +12%
                     </div>
                   </dd>
                 </dl>
@@ -554,220 +540,6 @@ const Dashboard: React.FC = () => {
             </div>
           </Card>
         )}
-
-        {permissions.canRead && (
-          <Card className="animate-slide-in">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <BuildingOffice2Icon className="h-6 w-6 sm:h-8 sm:w-8 text-primary-600" aria-hidden="true" />
-              </div>
-              <div className="ml-3 sm:ml-5 w-0 flex-1 min-w-0">
-                <dl>
-                  <dt className="text-xs sm:text-sm font-medium text-gray-500 truncate">
-                    Unidades
-                  </dt>
-                  <dd className="flex items-baseline">
-                    <div className="text-lg sm:text-2xl font-semibold text-gray-900 truncate">
-                      {stats.totalUnits}
-                    </div>
-                    <div
-                      className="ml-2 flex items-baseline text-xs sm:text-sm font-semibold text-success-600"
-                    >
-                      <ArrowTrendingUpIcon
-                        className="self-center flex-shrink-0 h-3 w-3 sm:h-4 sm:w-4 text-success-500"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Increased by</span>
-                      +2%
-                    </div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {permissions.canAccessPurchases && (
-          <Card className="animate-slide-in">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <ShoppingCartIcon className="h-6 w-6 sm:h-8 sm:w-8 text-primary-600" aria-hidden="true" />
-              </div>
-              <div className="ml-3 sm:ml-5 w-0 flex-1 min-w-0">
-                <dl>
-                  <dt className="text-xs sm:text-sm font-medium text-gray-500 truncate">
-                    Pedidos Pendentes
-                  </dt>
-                  <dd className="flex items-baseline">
-                    <div className="text-lg sm:text-2xl font-semibold text-gray-900 truncate">
-                      {stats.pendingPurchases}
-                    </div>
-                    <div
-                      className="ml-2 flex items-baseline text-xs sm:text-sm font-semibold text-error-600"
-                    >
-                      <ArrowTrendingDownIcon
-                        className="self-center flex-shrink-0 h-3 w-3 sm:h-4 sm:w-4 text-error-500"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Decreased by</span>
-                      -8%
-                    </div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {permissions.canAccessFinancial && (
-          <Card className="animate-slide-in">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CurrencyDollarIcon className="h-6 w-6 sm:h-8 sm:w-8 text-primary-600" aria-hidden="true" />
-              </div>
-              <div className="ml-3 sm:ml-5 w-0 flex-1 min-w-0">
-                <dl>
-                  <dt className="text-xs sm:text-sm font-medium text-gray-500 truncate">
-                    Gasto {startDate === format(startOfMonth(new Date()), 'yyyy-MM-dd') ? 'Mensal' : 'no Período'}
-                  </dt>
-                  <dd className="flex items-baseline">
-                    <div className="text-lg sm:text-2xl font-semibold text-gray-900 truncate">
-                      R$ {stats.monthlyExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </div>
-                    <div
-                      className="ml-2 flex items-baseline text-xs sm:text-sm font-semibold text-success-600"
-                    >
-                      <ArrowTrendingUpIcon
-                        className="self-center flex-shrink-0 h-3 w-3 sm:h-4 sm:w-4 text-success-500"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Increased by</span>
-                      +15%
-                    </div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </Card>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-4">
-            Atividades Recentes
-          </h3>
-          {recentActivity.length > 0 ? (
-            <div className="space-y-3">
-              {recentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-start space-x-3">
-                  <div className="flex-shrink-0 w-2 h-2 bg-primary-400 rounded-full mt-2"></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-gray-600">
-                      {activity.description} por {activity.user_name}
-                    </p>
-                    <span className="text-xs text-gray-400">
-                      {formatDateTime(activity.created_at)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500 text-center py-4">
-              Nenhuma atividade recente encontrada no período selecionado
-            </p>
-          )}
-        </Card>
-
-        <Card>
-          <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-4">
-            Alertas
-          </h3>
-          <div className="space-y-3">
-            {stockAlerts.length > 0 && (
-              <div className="flex items-center justify-between p-3 bg-warning-50 rounded-lg">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-warning-800">
-                    Estoque Baixo
-                  </p>
-                  <div className="text-xs text-warning-600 mt-1">
-                    {stockAlerts.map((alert, index) => (
-                      <p key={alert.id} className="mb-1">
-                        • {alert.item_name} ({alert.unit_name}): {alert.quantity} de {alert.min_quantity} {alert.unit_measure}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-                <span className="text-warning-600 font-semibold flex-shrink-0 ml-2">!</span>
-              </div>
-            )}
-            
-            {expiryAlerts.length > 0 && (
-              <div className="flex items-center justify-between p-3 bg-error-50 rounded-lg">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-error-800">
-                    Itens Vencidos
-                  </p>
-                  <div className="text-xs text-error-600 mt-1">
-                    {expiryAlerts.map((alert, index) => (
-                      <p key={alert.id} className="mb-1">
-                        • {alert.item_name} ({alert.unit_name}): {alert.quantity} unidade(s)
-                      </p>
-                    ))}
-                  </div>
-                </div>
-                <span className="text-error-600 font-semibold flex-shrink-0 ml-2">!</span>
-              </div>
-            )}
-            
-            {maintenanceAlerts.length > 0 && (
-              <div className="flex items-center justify-between p-3 bg-info-50 rounded-lg">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-info-800">
-                    Manutenções Programadas
-                  </p>
-                  <div className="text-xs text-info-600 mt-1">
-                    {maintenanceAlerts.map((alert, index) => (
-                      <p key={alert.id} className="mb-1">
-                        • {alert.item_name}: {formatDate(alert.next_maintenance_date)} ({alert.days_remaining} dias)
-                      </p>
-                    ))}
-                  </div>
-                </div>
-                <span className="text-info-600 font-semibold flex-shrink-0 ml-2">i</span>
-              </div>
-            )}
-            
-            {stockAlerts.length === 0 && expiryAlerts.length === 0 && maintenanceAlerts.length === 0 && (
-              <div className="flex items-center justify-between p-3 bg-success-50 rounded-lg">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-success-800">
-                    Tudo em Ordem
-                  </p>
-                  <p className="text-xs text-success-600 mt-1">
-                    Não há alertas pendentes no momento
-                  </p>
-                </div>
-                <span className="text-success-600 font-semibold flex-shrink-0 ml-2">✓</span>
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* Período do Dashboard */}
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-        <div className="flex items-center">
-          <ExclamationTriangleIcon className="h-5 w-5 text-gray-400 mr-2" />
-          <div>
-            <h4 className="text-sm font-medium text-gray-700">Informações do Dashboard</h4>
-            <p className="text-xs text-gray-500 mt-1">
-              Dados exibidos para o período de {formatDate(startDate)} até {formatDate(endDate)}
-              {selectedUnitId ? ` para a unidade ${units.find(u => u.id === selectedUnitId)?.name || ''}` : ''}
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );
