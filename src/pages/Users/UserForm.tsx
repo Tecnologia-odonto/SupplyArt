@@ -56,70 +56,116 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
     }
   };
 
+  const createUserWithEdgeFunction = async (data: FormData): Promise<boolean> => {
+    try {
+      const { data: response, error } = await supabase.functions.invoke('create-user', {
+        body: {
+          email: data.email,
+          password: data.password || 'temp123456',
+          name: data.name,
+          role: data.role,
+          unit_id: data.unit_id || null,
+        }
+      });
+
+      if (error) {
+        console.error('Edge function error:', error);
+        return false;
+      }
+
+      if (response?.error) {
+        console.error('Edge function returned error:', response.error);
+        toast.error(`Erro ao criar usuário: ${response.error}`);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Edge function failed:', error);
+      return false;
+    }
+  };
+
+  const createUserWithFallback = async (data: FormData): Promise<boolean> => {
+    try {
+      // Store current session to restore later
+      const { data: currentSession } = await supabase.auth.getSession();
+      
+      // Create user with signUp
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: data.email,
+        password: data.password || 'temp123456',
+      });
+
+      if (signUpError) {
+        console.error('SignUp error:', signUpError);
+        toast.error(`Erro ao criar usuário: ${signUpError.message}`);
+        return false;
+      }
+
+      if (!signUpData.user) {
+        toast.error('Falha ao criar usuário');
+        return false;
+      }
+
+      // Wait a moment for the trigger to create the profile
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Update the profile with the provided data
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          name: data.name,
+          email: data.email,
+          role: data.role,
+          unit_id: data.unit_id || null,
+        })
+        .eq('id', signUpData.user.id);
+
+      if (profileError) {
+        console.error('Profile update error:', profileError);
+        toast.error(`Erro ao atualizar perfil: ${profileError.message}`);
+        return false;
+      }
+
+      // Sign out the newly created user
+      await supabase.auth.signOut();
+      
+      // Restore the previous session if it existed
+      if (currentSession.session) {
+        await supabase.auth.setSession(currentSession.session);
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error('Fallback method error:', error);
+      toast.error(`Erro inesperado: ${error.message || 'Erro desconhecido'}`);
+      return false;
+    }
+  };
+
   const onSubmit = async (data: FormData) => {
     try {
       if (!user) {
-        // Tentar criar novo usuário usando edge function
-        let edgeFunctionFailed = false;
-        
-        try {
-          const { data: response, error } = await supabase.functions.invoke('create-user', {
-            body: {
-              email: data.email,
-              password: data.password || 'temp123456',
-              name: data.name,
-              role: data.role,
-              unit_id: data.unit_id || null,
-            }
-          });
+        // Creating new user
+        let success = false;
 
-          if (error) {
-            edgeFunctionFailed = true;
-          }
-        } catch (fetchError) {
-          // Captura erros de rede ou outros erros de fetch
-          edgeFunctionFailed = true;
+        // Try edge function first
+        success = await createUserWithEdgeFunction(data);
+
+        // If edge function fails, try fallback method
+        if (!success) {
+          console.log('Edge function failed, trying fallback method...');
+          success = await createUserWithFallback(data);
         }
 
-        if (edgeFunctionFailed) {
-          // Método alternativo: usar signUp mas fazer logout imediatamente
-          const currentSession = await supabase.auth.getSession();
-          
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: data.email,
-            password: data.password || 'temp123456',
-          });
-
-          if (signUpError) throw signUpError;
-
-          if (signUpData.user) {
-            // Aguardar um pouco para garantir que o trigger criou o perfil
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Atualizar o perfil criado automaticamente pelo trigger
-            const { error: profileError } = await supabase
-              .from('profiles')
-              .update({
-                name: data.name,
-                email: data.email,
-                role: data.role,
-                unit_id: data.unit_id || null,
-              })
-              .eq('id', signUpData.user.id);
-
-            if (profileError) throw profileError;
-
-            // Fazer logout do usuário recém-criado e restaurar sessão anterior
-            await supabase.auth.signOut();
-            
-            // Se havia uma sessão anterior, tentar restaurá-la
-            if (currentSession.data.session) {
-              await supabase.auth.setSession(currentSession.data.session);
-            }
-          }
+        if (!success) {
+          return; // Error messages already shown
         }
+
+        toast.success('Usuário criado com sucesso!');
       } else {
-        // Atualizar usuário existente
+        // Updating existing user
         const { error } = await supabase
           .from('profiles')
           .update({
@@ -130,14 +176,19 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
           })
           .eq('id', user.id);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Update error:', error);
+          toast.error(`Erro ao atualizar usuário: ${error.message}`);
+          return;
+        }
+
+        toast.success('Usuário atualizado com sucesso!');
       }
 
       onSave();
-      toast.success(user ? 'Usuário atualizado com sucesso!' : 'Usuário criado com sucesso!');
     } catch (error: any) {
-      console.error('Error saving user:', error);
-      toast.error(error.message || 'Erro ao salvar usuário');
+      console.error('Unexpected error in onSubmit:', error);
+      toast.error(`Erro inesperado: ${error.message || 'Erro desconhecido'}`);
     }
   };
 

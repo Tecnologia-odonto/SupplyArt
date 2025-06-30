@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { DocumentTextIcon, UserIcon, ClockIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, EyeIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
+import Button from '../../components/UI/Button';
 import Table from '../../components/UI/Table';
 import Modal from '../../components/UI/Modal';
 import Badge from '../../components/UI/Badge';
@@ -8,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 import { usePermissions } from '../../hooks/usePermissions';
 import toast from 'react-hot-toast';
 
-interface AuditLogWithDetails {
+interface AuditLogWithProfile {
   id: string;
   action: string;
   table_name: string;
@@ -23,15 +24,17 @@ interface AuditLogWithDetails {
 }
 
 const Logs: React.FC = () => {
-  const [logs, setLogs] = useState<AuditLogWithDetails[]>([]);
+  const [logs, setLogs] = useState<AuditLogWithProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-  const [selectedLog, setSelectedLog] = useState<AuditLogWithDetails | null>(null);
-  const [dateFilter, setDateFilter] = useState(() => {
-    const today = new Date();
-    const lastWeek = new Date(today);
-    lastWeek.setDate(today.getDate() - 7);
-    return lastWeek.toISOString().split('T')[0];
+  const [selectedLog, setSelectedLog] = useState<AuditLogWithProfile | null>(null);
+  const [startDate, setStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 7); // Últimos 7 dias por padrão
+    return date.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
   });
   const permissions = usePermissions();
 
@@ -39,7 +42,7 @@ const Logs: React.FC = () => {
     if (permissions.canAccessLogs) {
       fetchLogs();
     }
-  }, [dateFilter, permissions.canAccessLogs]);
+  }, [startDate, endDate, permissions.canAccessLogs]);
 
   const fetchLogs = async () => {
     try {
@@ -49,9 +52,10 @@ const Logs: React.FC = () => {
           *,
           user:profiles(name, email)
         `)
-        .gte('created_at', dateFilter + 'T00:00:00')
+        .gte('created_at', startDate + 'T00:00:00')
+        .lte('created_at', endDate + 'T23:59:59')
         .order('created_at', { ascending: false })
-        .limit(1000);
+        .limit(1000); // Limitar para performance
 
       if (error) throw error;
       setLogs(data || []);
@@ -81,55 +85,35 @@ const Logs: React.FC = () => {
 
   const getTableDisplayName = (tableName: string) => {
     const tableNames: Record<string, string> = {
-      'profiles': 'Usuários',
-      'units': 'Unidades',
-      'items': 'Itens',
-      'suppliers': 'Fornecedores',
-      'stock': 'Estoque',
-      'inventory': 'Inventário',
-      'inventory_items': 'Itens do Inventário',
-      'inventory_events': 'Eventos do Inventário',
-      'requests': 'Pedidos Internos',
-      'request_items': 'Itens dos Pedidos',
-      'purchases': 'Compras',
-      'purchase_items': 'Itens das Compras',
-      'movements': 'Movimentações',
-      'financial_transactions': 'Transações Financeiras',
-      'unit_budgets': 'Orçamentos',
-      'auth': 'Autenticação'
+      profiles: 'Usuários',
+      units: 'Unidades',
+      items: 'Itens',
+      suppliers: 'Fornecedores',
+      stock: 'Estoque',
+      inventory: 'Inventário',
+      inventory_items: 'Itens de Inventário',
+      inventory_events: 'Eventos de Inventário',
+      requests: 'Pedidos Internos',
+      request_items: 'Itens de Pedidos',
+      purchases: 'Compras',
+      purchase_items: 'Itens de Compras',
+      movements: 'Movimentações',
+      financial_transactions: 'Transações Financeiras',
+      unit_budgets: 'Orçamentos',
+      auth: 'Autenticação',
     };
-    return tableNames[tableName] || tableName;
-  };
 
-  const formatJsonValue = (value: any) => {
-    if (value === null || value === undefined) return '-';
-    if (typeof value === 'object') {
-      return JSON.stringify(value, null, 2);
-    }
-    return String(value);
+    return tableNames[tableName] || tableName;
   };
 
   const columns = [
     {
-      key: 'created_at',
-      title: 'Data/Hora',
-      render: (value: string) => (
-        <div className="text-sm">
-          <div>{new Date(value).toLocaleDateString('pt-BR')}</div>
-          <div className="text-gray-500">{new Date(value).toLocaleTimeString('pt-BR')}</div>
-        </div>
-      )
-    },
-    {
       key: 'user',
       title: 'Usuário',
       render: (user: any) => (
-        <div className="flex items-center">
-          <UserIcon className="h-4 w-4 text-gray-400 mr-2" />
-          <div className="text-sm">
-            <div className="font-medium">{user?.name || 'Sistema'}</div>
-            <div className="text-gray-500 text-xs">{user?.email || '-'}</div>
-          </div>
+        <div>
+          <div className="font-medium text-gray-900">{user?.name || 'Sistema'}</div>
+          <div className="text-sm text-gray-500">{user?.email || '-'}</div>
         </div>
       )
     },
@@ -141,9 +125,7 @@ const Logs: React.FC = () => {
     {
       key: 'table_name',
       title: 'Tabela',
-      render: (value: string) => (
-        <span className="text-sm font-medium">{getTableDisplayName(value)}</span>
-      )
+      render: (value: string) => getTableDisplayName(value)
     },
     {
       key: 'record_id',
@@ -153,20 +135,31 @@ const Logs: React.FC = () => {
       ) : '-'
     },
     {
+      key: 'created_at',
+      title: 'Data/Hora',
+      render: (value: string) => (
+        <div>
+          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-xs text-gray-500">{new Date(value).toLocaleTimeString('pt-BR')}</div>
+        </div>
+      )
+    },
+    {
       key: 'actions',
-      title: 'Detalhes',
-      render: (_: any, record: AuditLogWithDetails) => (
-        <button
+      title: 'Ações',
+      render: (_: any, record: AuditLogWithProfile) => (
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => {
             setSelectedLog(record);
             setDetailsModalOpen(true);
           }}
-          className="text-primary-600 hover:text-primary-800 text-sm font-medium"
         >
-          <EyeIcon className="h-4 w-4" />
-        </button>
-      )
-    }
+          <EyeIcon className="w-4 h-4" />
+        </Button>
+      ),
+    },
   ];
 
   if (!permissions.canAccessLogs) {
@@ -174,40 +167,113 @@ const Logs: React.FC = () => {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <h3 className="text-lg font-medium text-gray-900">Acesso Negado</h3>
-          <p className="text-gray-500">Você não tem privilegios para acessar os logs de auditoria.</p>
+          <p className="text-gray-500">Você não tem permissão para acessar os logs de auditoria.</p>
         </div>
       </div>
     );
   }
 
   const actionCounts = logs.reduce((acc, log) => {
-    const actionType = log.action.includes('CREATE') || log.action.includes('INSERT') ? 'create' :
-                      log.action.includes('UPDATE') ? 'update' :
-                      log.action.includes('DELETE') ? 'delete' : 'other';
-    acc[actionType] = (acc[actionType] || 0) + 1;
+    if (log.action.includes('CREATE') || log.action.includes('INSERT')) {
+      acc.creates = (acc.creates || 0) + 1;
+    } else if (log.action.includes('UPDATE')) {
+      acc.updates = (acc.updates || 0) + 1;
+    } else if (log.action.includes('DELETE')) {
+      acc.deletes = (acc.deletes || 0) + 1;
+    } else {
+      acc.others = (acc.others || 0) + 1;
+    }
     return acc;
   }, {} as Record<string, number>);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Logs de Auditoria</h1>
           <p className="mt-1 text-sm text-gray-600">
-            Histórico completo de todas as operações do sistema
+            Histórico completo de ações realizadas no sistema
           </p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <ClockIcon className="h-5 w-5 text-gray-400" />
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
-          />
         </div>
       </div>
 
+      {/* Filtros de Data */}
+      <Card>
+        <div className="flex items-center mb-4">
+          <CalendarIcon className="w-5 h-5 text-primary-600 mr-2" />
+          <h3 className="text-lg font-medium text-gray-900">Filtros de Período</h3>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">
+              Data Inicial
+            </label>
+            <input
+              id="start_date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-1">
+              Data Final
+            </label>
+            <input
+              id="end_date"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              setStartDate(today);
+              setEndDate(today);
+            }}
+          >
+            Hoje
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              const lastWeek = new Date();
+              lastWeek.setDate(lastWeek.getDate() - 7);
+              setStartDate(lastWeek.toISOString().split('T')[0]);
+              setEndDate(today);
+            }}
+          >
+            Última Semana
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              const lastMonth = new Date();
+              lastMonth.setMonth(lastMonth.getMonth() - 1);
+              setStartDate(lastMonth.toISOString().split('T')[0]);
+              setEndDate(today);
+            }}
+          >
+            Último Mês
+          </Button>
+        </div>
+      </Card>
+
+      {/* Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <div className="flex items-center">
@@ -219,7 +285,7 @@ const Logs: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-500">Criações</p>
               <p className="text-lg font-semibold text-gray-900">
-                {actionCounts.create || 0}
+                {actionCounts.creates || 0}
               </p>
             </div>
           </div>
@@ -235,7 +301,7 @@ const Logs: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-500">Atualizações</p>
               <p className="text-lg font-semibold text-gray-900">
-                {actionCounts.update || 0}
+                {actionCounts.updates || 0}
               </p>
             </div>
           </div>
@@ -251,7 +317,7 @@ const Logs: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-500">Exclusões</p>
               <p className="text-lg font-semibold text-gray-900">
-                {actionCounts.delete || 0}
+                {actionCounts.deletes || 0}
               </p>
             </div>
           </div>
@@ -272,15 +338,17 @@ const Logs: React.FC = () => {
         </Card>
       </div>
 
+      {/* Tabela de Logs */}
       <Card padding={false}>
         <Table
           columns={columns}
           data={logs}
           loading={loading}
-          emptyMessage="Nenhum log encontrado no período selecionado"
+          emptyMessage={`Nenhum log encontrado no período de ${new Date(startDate).toLocaleDateString('pt-BR')} até ${new Date(endDate).toLocaleDateString('pt-BR')}`}
         />
       </Card>
 
+      {/* Modal de Detalhes */}
       <Modal
         isOpen={detailsModalOpen}
         onClose={() => {
@@ -294,15 +362,9 @@ const Logs: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-500">Data/Hora</label>
-                <p className="mt-1 text-sm text-gray-900">
-                  {new Date(selectedLog.created_at).toLocaleString('pt-BR')}
-                </p>
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-500">Usuário</label>
                 <p className="mt-1 text-sm text-gray-900">
-                  {selectedLog.user?.name || 'Sistema'} ({selectedLog.user?.email || '-'})
+                  {selectedLog.user?.name || 'Sistema'} ({selectedLog.user?.email || 'N/A'})
                 </p>
               </div>
               <div>
@@ -311,14 +373,18 @@ const Logs: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-500">Tabela</label>
-                <p className="mt-1 text-sm text-gray-900">
-                  {getTableDisplayName(selectedLog.table_name)}
+                <p className="mt-1 text-sm text-gray-900">{getTableDisplayName(selectedLog.table_name)}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500">ID do Registro</label>
+                <p className="mt-1 text-sm text-gray-900 font-mono">
+                  {selectedLog.record_id || 'N/A'}
                 </p>
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-500">ID do Registro</label>
-                <p className="mt-1 text-sm text-gray-900 font-mono">
-                  {selectedLog.record_id || '-'}
+                <label className="block text-sm font-medium text-gray-500">Data/Hora</label>
+                <p className="mt-1 text-sm text-gray-900">
+                  {new Date(selectedLog.created_at).toLocaleString('pt-BR')}
                 </p>
               </div>
             </div>
@@ -326,8 +392,8 @@ const Logs: React.FC = () => {
             {selectedLog.old_values && (
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-2">Valores Anteriores</label>
-                <pre className="bg-gray-50 p-3 rounded-md text-xs overflow-auto max-h-40">
-                  {formatJsonValue(selectedLog.old_values)}
+                <pre className="bg-gray-100 p-3 rounded-md text-xs overflow-auto max-h-40">
+                  {JSON.stringify(selectedLog.old_values, null, 2)}
                 </pre>
               </div>
             )}
@@ -335,8 +401,8 @@ const Logs: React.FC = () => {
             {selectedLog.new_values && (
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-2">Valores Novos</label>
-                <pre className="bg-gray-50 p-3 rounded-md text-xs overflow-auto max-h-40">
-                  {formatJsonValue(selectedLog.new_values)}
+                <pre className="bg-gray-100 p-3 rounded-md text-xs overflow-auto max-h-40">
+                  {JSON.stringify(selectedLog.new_values, null, 2)}
                 </pre>
               </div>
             )}
