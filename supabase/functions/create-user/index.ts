@@ -6,15 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// System UUID for operations performed by the system
+const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // Create a Supabase client with the service role key
-    const supabaseAdmin = createClient(
+    const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
       {
@@ -27,76 +28,31 @@ serve(async (req) => {
 
     const { email, password, name, role, unit_id } = await req.json()
 
-    // Validate required fields
-    if (!email || !password || !name || !role) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: email, password, name, role' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    // Create the user using the admin client
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    // Create user in auth.users
+    const { data: authData, error: authError } = await supabaseClient.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // Auto-confirm email
+      email_confirm: true,
+      user_metadata: { name, role, unit_id }
     })
 
     if (authError) {
-      console.error('Auth error:', authError)
-      return new Response(
-        JSON.stringify({ error: authError.message }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
+      throw new Error(`User creation failed: ${authError.message}`)
     }
 
     if (!authData.user) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to create user' }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
+      throw new Error('User creation failed: No user returned')
     }
 
-    // Create or update the profile
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .upsert({
-        id: authData.user.id,
-        name,
-        email,
-        role,
-        unit_id: unit_id || null,
-      })
+    // Wait a moment for the trigger to create the profile
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
-    if (profileError) {
-      console.error('Profile error:', profileError)
-      
-      // If profile creation fails, clean up the auth user
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-      
-      return new Response(
-        JSON.stringify({ error: `Profile creation failed: ${profileError.message}` }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    // Create audit log
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        user_id: authData.user.id,
-        action: 'USER_CREATED',
+    // Create audit log with system user ID for system operation
+    const { error: auditError } = await supabaseClient
+      .from('audit_logs')
+      .insert({
+        user_id: SYSTEM_USER_ID, // Use system UUID instead of null
+        action: 'USER_CREATED_BY_ADMIN',
         table_name: 'profiles',
         record_id: authData.user.id,
         new_values: {
@@ -104,39 +60,38 @@ serve(async (req) => {
           name,
           role,
           unit_id,
-          created_via: 'admin_function'
+          created_by_system: true,
+          timestamp: new Date().toISOString()
         }
       })
-    } catch (auditError) {
-      console.error('Audit log error:', auditError)
-      // Don't fail the request if audit log fails
+
+    if (auditError) {
+      console.error('Audit log creation failed:', auditError)
+      // Don't fail the entire operation for audit log issues
     }
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        user: {
-          id: authData.user.id,
-          email: authData.user.email,
-          name,
-          role,
-          unit_id
-        }
+        user: authData.user,
+        message: 'User created successfully'
       }),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      },
     )
 
   } catch (error) {
-    console.error('Unexpected error:', error)
+    console.error('Error in create-user function:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
+      JSON.stringify({ 
+        error: error.message || 'An unexpected error occurred'
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      },
     )
   }
 })
