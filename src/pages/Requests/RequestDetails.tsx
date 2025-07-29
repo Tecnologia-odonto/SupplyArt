@@ -50,6 +50,34 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
 
       if (error) throw error;
       setRequestItems(data || []);
+
+      // Se for almoxarife, verificar estoque do CD para cada item (apenas do CD vinculado)
+      if (profile?.role === 'operador-almoxarife' && profile.unit_id && data) {
+        const itemsWithCDStock = await Promise.all(
+          data.map(async (item) => {
+            // Verificar se o CD do pedido é o mesmo do almoxarife
+            if (request.cd_unit_id !== profile.unit_id) {
+              return {
+                ...item,
+                cd_stock_available: 'N/A - CD diferente'
+              };
+            }
+
+            const { data: cdStock } = await supabase
+              .from('cd_stock')
+              .select('quantity')
+              .eq('item_id', item.item_id)
+              .eq('cd_unit_id', profile.unit_id)
+              .single();
+
+            return {
+              ...item,
+              cd_stock_available: cdStock?.quantity || 0
+            };
+          })
+        );
+        setRequestItems(itemsWithCDStock);
+      }
     } catch (error) {
       console.error('Error fetching request items:', error);
     } finally {

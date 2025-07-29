@@ -337,14 +337,20 @@ const MovementForm: React.FC<MovementFormProps> = ({ movement, onSave, onCancel 
               {...register('from_unit_id', { required: 'Unidade de origem é obrigatória' })}
             >
               <option value="">Selecione a unidade</option>
-              {units.map((unit) => (
+              {/* Para transferências, mostrar apenas CDs como origem */}
+              {(watchedType === 'transfer' ? units.filter(unit => unit.is_cd) : units).map((unit) => (
                 <option key={unit.id} value={unit.id}>
-                  {unit.name}
+                  {unit.name} {unit.is_cd ? '(CD)' : ''}
                 </option>
               ))}
             </select>
             {errors.from_unit_id && (
               <p className="mt-1 text-sm text-error-600">{errors.from_unit_id.message}</p>
+            )}
+            {watchedType === 'transfer' && (
+              <p className="mt-1 text-xs text-gray-500">
+                Para transferências, apenas Centros de Distribuição podem ser origem
+              </p>
             )}
           </div>
 

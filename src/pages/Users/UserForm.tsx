@@ -160,7 +160,8 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
     { value: 'operador-almoxarife', label: 'Operador Almoxarife' },
   ];
 
-  const needsUnit = ['operador-administrativo'].includes(selectedRole);
+  const needsUnit = ['operador-administrativo', 'gestor'].includes(selectedRole);
+  const needsCdUnit = ['operador-almoxarife'].includes(selectedRole);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -204,24 +205,6 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
         )}
       </div>
 
-      {!user && (
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-            Senha Temporária
-          </label>
-          <input
-            id="password"
-            type="password"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-            placeholder="Deixe em branco para usar senha padrão"
-            {...register('password')}
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Se não informar uma senha, será usada a senha padrão: temp123456
-          </p>
-        </div>
-      )}
-
       <div>
         <label htmlFor="role" className="block text-sm font-medium text-gray-700">
           Função *
@@ -246,7 +229,7 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
 
       <div>
         <label htmlFor="unit_id" className="block text-sm font-medium text-gray-700">
-          Unidade {needsUnit ? '*' : '(Opcional)'}
+          {needsCdUnit ? 'Centro de Distribuição' : 'Unidade'} {needsUnit || needsCdUnit ? '*' : '(Opcional)'}
         </label>
         <select
           id="unit_id"
@@ -254,27 +237,49 @@ const UserForm: React.FC<UserFormProps> = ({ user, onSave, onCancel }) => {
             errors.unit_id ? 'border-error-300' : ''
           }`}
           {...register('unit_id', { 
-            required: needsUnit ? 'Unidade é obrigatória para esta função' : false 
+            required: needsUnit || needsCdUnit ? 'Unidade é obrigatória para esta função' : false 
           })}
         >
           <option value="">
-            {needsUnit ? 'Selecione uma unidade' : 'Todas as unidades'}
+            {needsUnit ? 'Selecione uma unidade' : needsCdUnit ? 'Selecione um Centro de Distribuição' : 'Todas as unidades'}
           </option>
-          {units.map((unit) => (
+          {(needsCdUnit ? units.filter(unit => unit.is_cd) : units).map((unit) => (
             <option key={unit.id} value={unit.id}>
-              {unit.name}
+              {unit.name} {unit.is_cd ? '(CD)' : ''}
             </option>
           ))}
         </select>
         {errors.unit_id && (
           <p className="mt-1 text-sm text-error-600">{errors.unit_id.message}</p>
         )}
-        {needsUnit && (
+        {needsUnit ? (
           <p className="mt-1 text-xs text-gray-500">
-            Operadores administrativos devem estar vinculados a uma unidade específica.
+            {selectedRole === 'gestor' ? 'Gestores' : 'Operadores administrativos'} devem estar vinculados a uma unidade específica.
           </p>
-        )}
+        ) : needsCdUnit ? (
+          <p className="mt-1 text-xs text-gray-500">
+            Operadores almoxarife devem estar vinculados a um Centro de Distribuição específico.
+          </p>
+        ) : null}
       </div>
+
+      {!user && (
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            Senha (Opcional)
+          </label>
+          <input
+            id="password"
+            type="password"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+            placeholder="Deixe em branco para usar senha padrão"
+            {...register('password')}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Se não informar uma senha, será usada a senha padrão: temp123456
+          </p>
+        </div>
+      )}
 
       <div className="flex justify-end space-x-3 pt-4">
         <Button type="button" variant="outline" onClick={onCancel}>

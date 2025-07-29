@@ -13,6 +13,8 @@ import {
   DocumentTextIcon,
   UsersIcon,
   TruckIcon,
+  MapPinIcon,
+  UserCircleIcon,
   XMarkIcon
 } from '@heroicons/react/24/outline';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -28,10 +30,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: HomeIcon, show: true },
+    { name: 'Meu Perfil', href: '/profile', icon: UserCircleIcon, show: true },
     { name: 'Unidades', href: '/units', icon: BuildingOffice2Icon, show: permissions.canRead },
     { name: 'Itens', href: '/items', icon: CubeIcon, show: permissions.canAccessItems },
+    { name: 'Localizações', href: '/locations', icon: MapPinIcon, show: permissions.canRead },
     { name: 'Fornecedores', href: '/suppliers', icon: TruckIcon, show: permissions.canAccessFinancial },
     { name: 'Estoque', href: '/stock', icon: ArchiveBoxIcon, show: permissions.canAccessInventory },
+    { name: 'Estoque CD', href: '/cd-stock', icon: BuildingOffice2Icon, show: permissions.canAccessCDStock },
+    { name: 'Em Rota', href: '/em-rota', icon: TruckIcon, show: permissions.canRead },
     { name: 'Inventário', href: '/inventory', icon: ClipboardDocumentListIcon, show: permissions.canAccessInventory },
     { name: 'Pedidos', href: '/requests', icon: ClipboardDocumentCheckIcon, show: permissions.canAccessRequests },
     { name: 'Compras', href: '/purchases', icon: ShoppingCartIcon, show: permissions.canAccessPurchases },

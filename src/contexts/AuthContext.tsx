@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Profile } from '../types/database';
 import { User } from '@supabase/supabase-js';
+import toast from 'react-hot-toast';
 
 interface AuthContextData {
   user: User | null;
@@ -26,6 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastActivity, setLastActivity] = useState<number>(Date.now());
 
   const createAuditLog = async (action: string, userId?: string, details?: any) => {
     try {
@@ -40,6 +42,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error creating audit log:', error);
     }
   };
+
+  // Auto logout após 2 horas de inatividade para operadores administrativos
+  useEffect(() => {
+    if (!user || !profile || profile.role !== 'operador-administrativo') return;
+
+    const INACTIVITY_TIMEOUT = 2 * 60 * 60 * 1000; // 2 horas em ms
+
+    const checkInactivity = () => {
+      const now = Date.now();
+      if (now - lastActivity > INACTIVITY_TIMEOUT) {
+        toast.error('Sessão expirada por inatividade. Faça login novamente.');
+        signOut();
+      }
+    };
+
+    const updateActivity = () => {
+      setLastActivity(Date.now());
+    };
+
+    // Eventos que indicam atividade do usuário
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    events.forEach(event => {
+      document.addEventListener(event, updateActivity, true);
+    });
+
+    // Verificar inatividade a cada minuto
+    const interval = setInterval(checkInactivity, 60000);
+
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, updateActivity, true);
+      });
+      clearInterval(interval);
+    };
+  }, [user, profile, lastActivity]);
 
   useEffect(() => {
     // Get initial session

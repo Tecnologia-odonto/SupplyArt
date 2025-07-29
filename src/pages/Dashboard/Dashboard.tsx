@@ -174,9 +174,7 @@ const Dashboard: React.FC = () => {
           item:items(name, unit_measure),
           unit:units(name)
         `)
-        .not('min_quantity', 'is', null)
-        .filter('quantity', 'lt', 'min_quantity')
-        .limit(5);
+        .not('min_quantity', 'is', null);
 
       if (selectedUnitId) {
         stockAlertsQuery = stockAlertsQuery.eq('unit_id', selectedUnitId);
@@ -250,7 +248,10 @@ const Dashboard: React.FC = () => {
       if (activityError) throw activityError;
 
       // Format stock alerts
-      const formattedStockAlerts = stockAlertsData?.map(alert => ({
+      const formattedStockAlerts = stockAlertsData
+        ?.filter(alert => alert.quantity < alert.min_quantity)
+        ?.slice(0, 5)
+        ?.map(alert => ({
         id: alert.id,
         item_name: alert.item.name,
         unit_name: alert.unit.name,

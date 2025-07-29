@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/UI/Button';
@@ -12,6 +13,10 @@ interface LoginForm {
 
 const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
   const { signIn } = useAuth();
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>();
 
@@ -75,6 +80,31 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!resetEmail) {
+      toast.error('Digite seu email para recuperar a senha');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
+
+      if (error) throw error;
+      
+      toast.success('Email de recuperação enviado! Verifique sua caixa de entrada e siga as instruções para redefinir sua senha.');
+      setShowForgotPassword(false);
+      setResetEmail('');
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      toast.error(error.message || 'Erro ao enviar email de recuperação');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-accent-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
@@ -120,25 +150,50 @@ const Login: React.FC = () => {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Senha
               </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
-                  errors.password ? 'border-error-300' : 'border-gray-300'
-                } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 text-sm sm:text-base`}
-                placeholder="Sua senha"
-                {...register('password', {
-                  required: 'Senha é obrigatória',
-                  minLength: {
-                    value: 6,
-                    message: 'Senha deve ter pelo menos 6 caracteres'
-                  }
-                })}
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  className={`mt-1 appearance-none relative block w-full px-3 py-2 pr-10 border ${
+                    errors.password ? 'border-error-300' : 'border-gray-300'
+                  } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 text-sm sm:text-base`}
+                  placeholder="Sua senha"
+                  {...register('password', {
+                    required: 'Senha é obrigatória',
+                    minLength: {
+                      value: 6,
+                      message: 'Senha deve ter pelo menos 6 caracteres'
+                    }
+                  })}
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeSlashIcon className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                  ) : (
+                    <EyeIcon className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                  )}
+                </button>
+              </div>
               {errors.password && (
                 <p className="mt-1 text-sm text-error-600">{errors.password.message}</p>
               )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="text-sm">
+              <button
+                type="button"
+                className="font-medium text-primary-600 hover:text-primary-500"
+                onClick={() => setShowForgotPassword(true)}
+              >
+                Esqueceu sua senha?
+              </button>
             </div>
           </div>
 
@@ -160,6 +215,46 @@ const Login: React.FC = () => {
             </p>
           </div>
         </form>
+
+        {/* Modal de Recuperação de Senha */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowForgotPassword(false)}></div>
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Recuperar Senha</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Digite seu email cadastrado para receber as instruções de recuperação de senha.
+                  </p>
+                  <input
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="seu@email.com"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                  />
+                </div>
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <Button
+                    onClick={handleForgotPassword}
+                    loading={resetLoading}
+                    className="w-full sm:w-auto sm:ml-3"
+                  >
+                    Enviar Email
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowForgotPassword(false)}
+                    className="mt-3 w-full sm:mt-0 sm:w-auto"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

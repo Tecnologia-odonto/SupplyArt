@@ -29,6 +29,8 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [stockQuantity, setStockQuantity] = useState<number>(0);
 
+  const [locations, setLocations] = useState<any[]>([]);
+
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       item_id: inventory?.item_id || '',
@@ -64,8 +66,27 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
   useEffect(() => {
     if (watchedItemId && watchedUnitId) {
       fetchStockQuantity();
+      fetchLocations();
     }
   }, [watchedItemId, watchedUnitId]);
+
+  const fetchLocations = async () => {
+    if (!watchedUnitId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('locations')
+        .select('*')
+        .eq('unit_id', watchedUnitId)
+        .order('name');
+
+      if (error) throw error;
+      setLocations(data || []);
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+      setLocations([]);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -394,16 +415,40 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
           <label htmlFor="location" className="block text-sm font-medium text-gray-700">
             Localização *
           </label>
-          <input
-            id="location"
-            type="text"
-            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
-              errors.location ? 'border-error-300' : ''
-            }`}
-            {...register('location', { required: 'Localização é obrigatória' })}
-          />
+          {locations.length > 0 ? (
+            <select
+              id="location"
+              className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+                errors.location ? 'border-error-300' : ''
+              }`}
+              {...register('location', { required: 'Localização é obrigatória' })}
+            >
+              <option value="">Selecione uma localização</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.name}>
+                  {location.name}
+                  {location.description && ` - ${location.description}`}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              id="location"
+              type="text"
+              placeholder="Ex: Estoque Geral, Recepção, Administração"
+              className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+                errors.location ? 'border-error-300' : ''
+              }`}
+              {...register('location', { required: 'Localização é obrigatória' })}
+            />
+          )}
           {errors.location && (
             <p className="mt-1 text-sm text-error-600">{errors.location.message}</p>
+          )}
+          {locations.length === 0 && watchedUnitId && (
+            <p className="mt-1 text-xs text-blue-600">
+              💡 Nenhuma localização cadastrada. Digite uma nova ou cadastre localizações no menu "Localizações".
+            </p>
           )}
         </div>
 

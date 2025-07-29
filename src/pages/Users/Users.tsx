@@ -105,6 +105,11 @@ const Users: React.FC = () => {
           <div className="ml-3">
             <div className="font-medium text-gray-900">{value}</div>
             <div className="text-sm text-gray-500">{record.email}</div>
+            {record.unit && (
+              <div className="text-xs text-blue-600">
+                {record.role === 'operador-almoxarife' ? 'CD: ' : 'Unidade: '}{record.unit.name}
+              </div>
+            )}
           </div>
         </div>
       )
@@ -117,7 +122,15 @@ const Users: React.FC = () => {
     {
       key: 'unit',
       title: 'Unidade',
-      render: (unit: any) => unit?.name || 'Todas as unidades'
+      render: (unit: any, record: ProfileWithUnit) => {
+        if (!unit) return 'Todas as unidades';
+        
+        if (record.role === 'operador-almoxarife') {
+          return `${unit.name} (CD)`;
+        }
+        
+        return unit.name;
+      }
     },
     {
       key: 'created_at',

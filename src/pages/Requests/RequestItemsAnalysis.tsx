@@ -56,10 +56,10 @@ const RequestItemsAnalysis: React.FC<RequestItemsAnalysisProps> = ({
       // Para cada item, verificar estoque disponível no CD
       const itemsWithStock = await Promise.all((requestItems || []).map(async (item) => {
         const { data: stockData } = await supabase
-          .from('stock')
+          .from('cd_stock')
           .select('quantity')
           .eq('item_id', item.item_id)
-          .eq('unit_id', cdUnitId)
+          .eq('cd_unit_id', cdUnitId)
           .single();
 
         return {

@@ -69,6 +69,7 @@ export type Database = {
           category: string | null;
           show_in_company: boolean;
           has_lifecycle: boolean;
+          requires_maintenance: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -81,6 +82,7 @@ export type Database = {
           category?: string | null;
           show_in_company?: boolean;
           has_lifecycle?: boolean;
+          requires_maintenance?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -93,6 +95,7 @@ export type Database = {
           category?: string | null;
           show_in_company?: boolean;
           has_lifecycle?: boolean;
+          requires_maintenance?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -589,6 +592,32 @@ export type Database = {
           updated_at?: string;
         };
       };
+      locations: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          unit_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          unit_id: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string | null;
+          unit_id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -618,6 +647,7 @@ export type Movement = Database['public']['Tables']['movements']['Row'];
 export type AuditLog = Database['public']['Tables']['audit_logs']['Row'];
 export type FinancialTransaction = Database['public']['Tables']['financial_transactions']['Row'];
 export type UnitBudget = Database['public']['Tables']['unit_budgets']['Row'];
+export type Location = Database['public']['Tables']['locations']['Row'];
 
 export type UserRole = 'admin' | 'gestor' | 'operador-financeiro' | 'operador-administrativo' | 'operador-almoxarife';
 export type PurchaseStatus = 'pedido-realizado' | 'em-cotacao' | 'comprado-aguardando' | 'chegou-cd' | 'enviado' | 'erro-pedido' | 'finalizado';

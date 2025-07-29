@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { Request, Unit, Item } from '../../types/database';
 import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/UI/Button';
+import Modal from '../../components/UI/Modal';
 import { createAuditLog } from '../../utils/auditLogger';
 import toast from 'react-hot-toast';
 
@@ -36,6 +37,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   const [availableItems, setAvailableItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [requestItems, setRequestItems] = useState<RequestItemForm[]>([{ item_id: '', quantity_requested: 1, notes: '' }]);
+  const [cdStockInfo, setCdStockInfo] = useState<Record<string, number>>({});
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [itemsNeedingPurchase, setItemsNeedingPurchase] = useState<any[]>([]);
   const { profile } = useAuth();
 
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -44,17 +48,18 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       cd_unit_id: request?.cd_unit_id || '',
       priority: request?.priority || 'normal',
       notes: request?.notes || '',
-      status: request?.status || 'solicitado',
+      status: 'solicitado', // Sempre começar como solicitado
     }
   });
 
   const watchedStatus = watch('status');
   const watchedCdUnitId = watch('cd_unit_id');
   const isNewRequest = !request;
-  const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
+  const canEditStatus = !isNewRequest && profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
   const canEditFinancial = watchedStatus === 'aprovado' && profile?.role && ['admin', 'gestor', 'operador-financeiro'].includes(profile.role);
   const isFinalized = ['aprovado-unidade', 'cancelado'].includes(watchedStatus);
   const canEditItems = !isFinalized && watchedStatus !== 'erro-pedido';
+  const canCloseRequest = profile?.role === 'operador-administrativo';
 
   useEffect(() => {
     fetchData();
@@ -63,6 +68,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   useEffect(() => {
     if (watchedCdUnitId) {
       fetchAvailableItems();
+      fetchCdStockInfo();
     }
   }, [watchedCdUnitId]);
 
@@ -97,16 +103,16 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     try {
       // Buscar itens que:
       // 1. Estão marcados como "Exibir na empresa"
-      // 2. Têm estoque disponível no CD selecionado
+      // 2. Têm estoque disponível no CD selecionado (tabela cd_stock)
       const { data: stockItems, error } = await supabase
-        .from('stock')
+        .from('cd_stock')
         .select(`
           quantity,
           item:items!inner(*)
         `)
-        .eq('unit_id', watchedCdUnitId)
+        .eq('cd_unit_id', watchedCdUnitId)
         .eq('item.show_in_company', true)
-        .gt('quantity', 0);
+        .gte('quantity', 0); // Mostrar todos os itens, mesmo com estoque 0
 
       if (error) throw error;
 
@@ -117,6 +123,28 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     } catch (error) {
       console.error('Error fetching available items:', error);
       setAvailableItems([]);
+    }
+  };
+
+  const fetchCdStockInfo = async () => {
+    if (!watchedCdUnitId) return;
+
+    try {
+      const { data: stockData, error } = await supabase
+        .from('cd_stock')
+        .select('item_id, quantity')
+        .eq('cd_unit_id', watchedCdUnitId);
+
+      if (error) throw error;
+
+      const stockMap: Record<string, number> = {};
+      stockData?.forEach(stock => {
+        stockMap[stock.item_id] = stock.quantity;
+      });
+      setCdStockInfo(stockMap);
+    } catch (error) {
+      console.error('Error fetching CD stock info:', error);
+      setCdStockInfo({});
     }
   };
 
@@ -172,6 +200,72 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }, 0);
   };
 
+  const validateStockForSending = () => {
+    const itemsWithInsufficientStock: any[] = [];
+    
+    requestItems.forEach(item => {
+      if (item.item_id) {
+        const availableStock = cdStockInfo[item.item_id] || 0;
+        const quantityToSend = item.quantity_sent || item.quantity_requested;
+        
+        if (quantityToSend > availableStock) {
+          const itemInfo = availableItems.find(i => i.id === item.item_id);
+          itemsWithInsufficientStock.push({
+            ...item,
+            item_info: itemInfo,
+            available_stock: availableStock,
+            quantity_needed: quantityToSend
+          });
+        }
+      }
+    });
+    
+    return itemsWithInsufficientStock;
+  };
+
+  const handleCreatePurchaseForItems = async (items: any[]) => {
+    if (!profile) {
+      toast.error('Usuário não encontrado');
+      return;
+    }
+
+    try {
+      // Criar compra para os itens em falta
+      const { data: newPurchase, error: purchaseError } = await supabase
+        .from('purchases')
+        .insert({
+          unit_id: watchedCdUnitId, // CD faz a compra
+          requester_id: profile.id,
+          status: 'pedido-realizado',
+          notes: `Compra criada para suprir estoque insuficiente do pedido #${request?.id?.slice(0, 8) || 'novo'}`,
+        })
+        .select()
+        .single();
+
+      if (purchaseError) throw purchaseError;
+
+      // Adicionar itens à compra
+      const purchaseItems = items.map(item => ({
+        purchase_id: newPurchase.id,
+        item_id: item.item_id,
+        quantity: item.quantity_needed - item.available_stock, // Quantidade em falta
+      }));
+
+      const { error: itemsError } = await supabase
+        .from('purchase_items')
+        .insert(purchaseItems);
+
+      if (itemsError) throw itemsError;
+
+      toast.success(`Pedido de compra criado! ID: ${newPurchase.id.slice(0, 8)}`);
+      setShowPurchaseModal(false);
+      setItemsNeedingPurchase([]);
+    } catch (error) {
+      console.error('Error creating purchase:', error);
+      toast.error('Erro ao criar pedido de compra');
+    }
+  };
+
   const onSubmit = async (data: FormData) => {
     if (!profile) {
       toast.error('Usuário não encontrado');
@@ -183,6 +277,17 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     if (validItems.length === 0) {
       toast.error('Adicione pelo menos um item ao pedido');
       return;
+    }
+
+    // Validação especial para status "enviado"
+    if (data.status === 'enviado' && canEditStatus) {
+      const itemsWithInsufficientStock = validateStockForSending();
+      
+      if (itemsWithInsufficientStock.length > 0) {
+        setItemsNeedingPurchase(itemsWithInsufficientStock);
+        setShowPurchaseModal(true);
+        return; // Não continuar com o envio
+      }
     }
 
     // Validações especiais para status aprovado
@@ -277,6 +382,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           request_id: requestId,
           item_id: item.item_id,
           quantity_requested: Number(item.quantity_requested),
+          quantity_sent: item.quantity_sent ? Number(item.quantity_sent) : null,
           notes: item.notes || null,
           unit_price: item.unit_price ? Number(item.unit_price) : null,
           has_error: item.has_error || false,
@@ -418,10 +524,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </label>
               <select
                 id="requesting_unit_id"
-                disabled={!isNewRequest || isFinalized}
+                disabled={!isNewRequest || isFinalized || profile?.role === 'operador-administrativo'}
                 className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
                   errors.requesting_unit_id ? 'border-error-300' : ''
-                } ${!isNewRequest || isFinalized ? 'bg-gray-100' : ''}`}
+                } ${!isNewRequest || isFinalized || profile?.role === 'operador-administrativo' ? 'bg-gray-100' : ''}`}
                 {...register('requesting_unit_id', { required: 'Unidade solicitante é obrigatória' })}
               >
                 <option value="">Selecione a unidade solicitante</option>
@@ -433,6 +539,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </select>
               {errors.requesting_unit_id && (
                 <p className="mt-1 text-sm text-error-600">{errors.requesting_unit_id.message}</p>
+              )}
+              {profile?.role === 'operador-administrativo' && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Como operador administrativo, a unidade solicitante é automaticamente sua unidade
+                </p>
               )}
             </div>
 
@@ -592,7 +703,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       <option value="">Selecione um item</option>
                       {availableItems.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.name} ({item.code})
+                          {item.name} ({item.code}) - Estoque CD: {cdStockInfo[item.id] || 0}
                         </option>
                       ))}
                     </select>
@@ -613,6 +724,42 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       }`}
                     />
                   </div>
+
+                  {canEditStatus && watchedStatus === 'preparando' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Nova Quantidade *
+                      </label>
+                      {(() => {
+                        const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
+                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_requested;
+                        const hasInsufficientStock = quantityToSend > availableStock;
+                        
+                        return (
+                          <div>
+                            <input
+                              type="number"
+                              min="1"
+                              max={requestItem.quantity_requested}
+                              value={requestItem.quantity_sent || requestItem.quantity_requested}
+                              onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
+                              className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
+                                hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                              }`}
+                            />
+                            <p className="mt-1 text-xs text-gray-500">
+                              Estoque CD: {availableStock} | Máximo: {requestItem.quantity_requested}
+                            </p>
+                            {hasInsufficientStock && (
+                              <p className="mt-1 text-xs text-red-600">
+                                ⚠️ Estoque insuficiente! Disponível: {availableStock}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {canEditFinancial && (
                     <div>
@@ -701,7 +848,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       <option value="">Selecione um item</option>
                       {availableItems.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.name} ({item.code})
+                          {item.name} ({item.code}) - Estoque CD: {cdStockInfo[item.id] || 0}
                         </option>
                       ))}
                     </select>
@@ -722,6 +869,42 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       }`}
                     />
                   </div>
+
+                  {canEditStatus && watchedStatus === 'preparando' && (
+                    <div className="w-32">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Nova Qtd *
+                      </label>
+                      {(() => {
+                        const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
+                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_requested;
+                        const hasInsufficientStock = quantityToSend > availableStock;
+                        
+                        return (
+                          <div>
+                            <input
+                              type="number"
+                              min="1"
+                              max={requestItem.quantity_requested}
+                              value={requestItem.quantity_sent || requestItem.quantity_requested}
+                              onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
+                              className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
+                                hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                              }`}
+                            />
+                            <p className="mt-1 text-xs text-gray-500">
+                              CD: {availableStock}
+                            </p>
+                            {hasInsufficientStock && (
+                              <p className="mt-1 text-xs text-red-600">
+                                ⚠️ Insuficiente!
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {canEditFinancial && (
                     <div className="w-32">
@@ -821,6 +1004,20 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           <Button type="button" variant="outline" onClick={onCancel} className="w-full sm:w-auto">
             Cancelar
           </Button>
+          {canCloseRequest && (
+            <Button 
+              type="button" 
+              variant="secondary"
+              onClick={() => {
+                // Implementar lógica de fechar pedido
+                toast.success('Pedido fechado! Aguardando aprovação.');
+                onCancel();
+              }}
+              className="w-full sm:w-auto"
+            >
+              Fechar Pedido
+            </Button>
+          )}
           {!isFinalized && (
             <Button 
               type="submit" 
@@ -833,6 +1030,103 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           )}
         </div>
       </form>
+
+      {/* Modal de Estoque Insuficiente */}
+      <Modal
+        isOpen={showPurchaseModal}
+        onClose={() => {
+          setShowPurchaseModal(false);
+          setItemsNeedingPurchase([]);
+        }}
+        title="Estoque Insuficiente no CD"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex items-center">
+              <span className="text-red-600 text-xl mr-3">⚠️</span>
+              <div>
+                <h4 className="text-sm font-medium text-red-800">Estoque Insuficiente</h4>
+                <p className="text-sm text-red-700 mt-1">
+                  Alguns itens não possuem estoque suficiente no CD para envio.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Item
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Necessário
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Disponível
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Faltando
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {itemsNeedingPurchase.map((item, index) => (
+                  <tr key={index}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{item.item_info?.name}</div>
+                        <div className="text-sm text-gray-500">{item.item_info?.code}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {item.quantity_needed}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {item.available_stock}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">
+                      {item.quantity_needed - item.available_stock}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-4">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setShowPurchaseModal(false);
+                setItemsNeedingPurchase([]);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              variant="secondary"
+              onClick={() => handleCreatePurchaseForItems(itemsNeedingPurchase)}
+            >
+              Criar Pedido de Compra
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                setShowPurchaseModal(false);
+                setItemsNeedingPurchase([]);
+                toast('Ajuste as quantidades e motivos antes de enviar');
+              }}
+            >
+              Ajustar Quantidades
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

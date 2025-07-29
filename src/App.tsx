@@ -4,11 +4,16 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Auth/Login';
+import ResetPassword from './pages/Auth/ResetPassword';
 import Dashboard from './pages/Dashboard/Dashboard';
+import Profile from './pages/Profile/Profile';
 import Items from './pages/Items/Items';
 import Units from './pages/Units/Units';
+import Locations from './pages/Locations/Locations';
 import Suppliers from './pages/Suppliers/Suppliers';
 import Stock from './pages/Stock/Stock';
+import CDStock from './pages/CDStock/CDStock';
+import EmRota from './pages/EmRota/EmRota';
 import Inventory from './pages/Inventory/Inventory';
 import Requests from './pages/Requests/Requests';
 import Purchases from './pages/Purchases/Purchases';
@@ -66,10 +71,14 @@ function App() {
                   <Layout>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
+                      <Route path="/profile" element={<Profile />} />
                       <Route path="/items" element={<Items />} />
                       <Route path="/units" element={<Units />} />
+                      <Route path="/locations" element={<Locations />} />
                       <Route path="/suppliers" element={<Suppliers />} />
                       <Route path="/stock" element={<Stock />} />
+                      <Route path="/cd-stock" element={<CDStock />} />
+                      <Route path="/em-rota" element={<EmRota />} />
                       <Route path="/inventory" element={<Inventory />} />
                       <Route path="/requests" element={<Requests />} />
                       <Route path="/purchases" element={<Purchases />} />
@@ -77,6 +86,7 @@ function App() {
                       <Route path="/movements" element={<Movements />} />
                       <Route path="/logs" element={<Logs />} />
                       <Route path="/users" element={<Users />} />
+                      <Route path="/reset-password" element={<ResetPassword />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
                   </Layout>

@@ -19,6 +19,9 @@ const Units: React.FC = () => {
   const permissions = usePermissions();
 
   useEffect(() => {
+    if (!permissions.canManageUnits) {
+      return; // Não carregar dados se não tem permissão
+    }
     fetchUnits();
   }, []);
 
@@ -72,6 +75,18 @@ const Units: React.FC = () => {
     setModalOpen(false);
     setEditingUnit(null);
   };
+
+  // Verificar se o usuário tem acesso ao módulo de unidades
+  if (!permissions.canManageUnits) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <h3 className="text-lg font-medium text-gray-900">Acesso Negado</h3>
+          <p className="text-gray-500">Você não tem permissão para gerenciar unidades.</p>
+        </div>
+      </div>
+    );
+  }
 
   const columns = [
     {
