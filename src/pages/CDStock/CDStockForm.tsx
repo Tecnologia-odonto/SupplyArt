@@ -33,7 +33,7 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
       cd_unit_id: stock?.cd_unit_id || profile?.unit_id || '',
       quantity: stock?.quantity || 0,
       min_quantity: stock?.min_quantity || 0,
-      max_quantity: stock?.max_quantity || 0,
+      max_quantity: stock?.max_quantity || 9999,
       location: stock?.location || 'Estoque CD',
     }
   });
@@ -69,6 +69,22 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
 
   const onSubmit = async (data: FormData) => {
     try {
+      // Se uma nova localização foi digitada, criar na tabela de localizações
+      if (data.location && data.location !== 'Estoque CD') {
+        try {
+          await supabase
+            .from('locations')
+            .insert({
+              name: data.location,
+              unit_id: data.cd_unit_id,
+              description: 'Criada automaticamente via estoque CD'
+            });
+        } catch (locationError) {
+          console.warn('Warning: Could not save location to database:', locationError);
+          // Continuar mesmo se não conseguir salvar a localização
+        }
+      }
+
       // Validação de quantidade máxima
       if (data.max_quantity && data.quantity > data.max_quantity) {
         toast.error(`Quantidade não pode exceder o limite máximo de ${data.max_quantity}`);
@@ -95,7 +111,7 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
         // Verificar se já existe estoque para este item neste CD
         const { data: existingStock, error: checkError } = await supabase
           .from('cd_stock')
-          .select('id')
+          .select('*')
           .eq('item_id', data.item_id)
           .eq('cd_unit_id', data.cd_unit_id)
           .maybeSingle();
@@ -105,11 +121,23 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
         }
 
         if (existingStock) {
-          // Atualizar estoque existente
+          // AGRUPAR: Somar à quantidade existente ao invés de substituir
+          const newQuantity = existingStock.quantity + Number(data.quantity);
+          const updatedStockData = {
+            ...stockData,
+            quantity: newQuantity,
+            // Manter configurações existentes se não foram alteradas
+            min_quantity: data.min_quantity ? Number(data.min_quantity) : existingStock.min_quantity,
+            max_quantity: data.max_quantity ? Number(data.max_quantity) : (existingStock.max_quantity || 9999),
+            location: data.location || existingStock.location,
+          };
+          
           result = await supabase
             .from('cd_stock')
-            .update(stockData)
+            .update(updatedStockData)
             .eq('id', existingStock.id);
+            
+          toast.success(`Quantidade adicionada! Total agora: ${newQuantity}`);
         } else {
           // Criar novo registro de estoque
           result = await supabase
@@ -150,8 +178,8 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
       <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
         <h4 className="text-sm font-medium text-blue-800 mb-2">📦 Estoque do Centro de Distribuição</h4>
         <p className="text-xs text-blue-700">
-          Gerencie o estoque dos Centros de Distribuição. Este estoque será usado para atender 
-          pedidos das unidades através do fluxo: CD → Em Rota → Unidade.
+          <strong>Agrupamento Inteligente:</strong> Se o item já existe neste CD, a quantidade será somada ao total existente.
+          Este estoque será usado para atender pedidos das unidades através do fluxo: CD → Em Rota → Unidade.
         </p>
       </div>
 

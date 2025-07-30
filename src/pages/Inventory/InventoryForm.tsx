@@ -114,7 +114,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
         .from('stock')
         .select('quantity')
         .eq('item_id', watchedItemId)
-        .eq('unit_id', watchedUnitId)
+        .contains('unit_ids', [watchedUnitId])
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -127,6 +127,22 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
 
   const onSubmit = async (data: FormData) => {
     try {
+      // Se uma nova localização foi digitada, criar na tabela de localizações
+      if (data.location && locations.length === 0) {
+        try {
+          await supabase
+            .from('locations')
+            .insert({
+              name: data.location,
+              unit_id: data.unit_id,
+              description: 'Criada automaticamente via inventário'
+            });
+        } catch (locationError) {
+          console.warn('Warning: Could not save location to database:', locationError);
+          // Continuar mesmo se não conseguir salvar a localização
+        }
+      }
+
       // Validar se item com vida útil tem quantidade 1
       if (selectedItem?.has_lifecycle && data.quantity !== 1) {
         toast.error('Itens com vida útil devem ter quantidade igual a 1');

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { TruckIcon, EyeIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { TruckIcon, EyeIcon, CheckIcon, MapPinIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import Table from '../../components/UI/Table';
@@ -33,11 +33,115 @@ interface EmRotaWithDetails {
   } | null;
 }
 
+// Componente da animação de entrega
+const DeliveryAnimation: React.FC<{ 
+  fromUnit: string; 
+  toUnit: string; 
+  sentAt: string; 
+  isDelivered: boolean;
+  onAnimationComplete?: () => void;
+}> = ({ fromUnit, toUnit, sentAt, isDelivered, onAnimationComplete }) => {
+  const [progress, setProgress] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState('');
+  
+  useEffect(() => {
+    if (isDelivered) {
+      setProgress(100);
+      return;
+    }
+
+    const sentTime = new Date(sentAt).getTime();
+    const deliveryDuration = 3 * 60 * 60 * 1000; // 3 horas em ms
+    const expectedDelivery = sentTime + deliveryDuration;
+    
+    const updateProgress = () => {
+      const now = Date.now();
+      const elapsed = now - sentTime;
+      const progressPercent = Math.min((elapsed / deliveryDuration) * 100, 100);
+      
+      setProgress(progressPercent);
+      
+      // Calcular tempo restante
+      const remaining = Math.max(expectedDelivery - now, 0);
+      const hours = Math.floor(remaining / (1000 * 60 * 60));
+      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+      
+      if (remaining > 0) {
+        setTimeRemaining(`${hours}h ${minutes}m restantes`);
+      } else {
+        setTimeRemaining('Entrega prevista');
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        }
+      }
+    };
+
+    updateProgress();
+    const interval = setInterval(updateProgress, 30000); // Atualizar a cada 30 segundos
+
+    return () => clearInterval(interval);
+  }, [sentAt, isDelivered, onAnimationComplete]);
+
+  return (
+    <div className="bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200 rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-medium text-blue-800">🚚 Rastreamento de Entrega</h4>
+        <span className="text-xs text-blue-600 font-medium">
+          {isDelivered ? '✅ Entregue' : timeRemaining}
+        </span>
+      </div>
+      
+      {/* Rota visual */}
+      <div className="relative">
+        {/* Linha da rota */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center space-x-2">
+            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+            <span className="text-xs font-medium text-blue-700">{fromUnit}</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-medium text-green-700">{toUnit}</span>
+            <div className={`w-3 h-3 rounded-full ${isDelivered ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+          </div>
+        </div>
+        
+        {/* Barra de progresso */}
+        <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-blue-500 to-green-500 rounded-full transition-all duration-1000 ease-out"
+            style={{ width: `${progress}%` }}
+          ></div>
+        </div>
+        
+        {/* Motinha animada */}
+        <div 
+          className="absolute top-0 transform -translate-y-1 transition-all duration-1000 ease-out"
+          style={{ left: `calc(${progress}% - 12px)` }}
+        >
+          <div className={`text-lg ${isDelivered ? '' : 'animate-bounce'}`}>
+            🏍️
+          </div>
+        </div>
+      </div>
+      
+      {/* Informações adicionais */}
+      <div className="mt-3 flex justify-between items-center text-xs text-gray-600">
+        <span>Enviado: {new Date(sentAt).toLocaleString('pt-BR')}</span>
+        <span className="font-medium">
+          {Math.round(progress)}% do trajeto
+        </span>
+      </div>
+    </div>
+  );
+};
+
 const EmRota: React.FC = () => {
   const [emRotaItems, setEmRotaItems] = useState<EmRotaWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [selectedItemForAnimation, setSelectedItemForAnimation] = useState<any>(null);
+  const [showAnimation, setShowAnimation] = useState(false);
   const permissions = usePermissions();
   const { profile } = useAuth();
 
@@ -165,12 +269,24 @@ const EmRota: React.FC = () => {
 
         // Se houver request_id, atualizar status do pedido para 'recebido'
         if (requestId) {
-          const { error: requestError } = await supabase
-            .from('requests')
-            .update({ status: 'recebido' })
-            .eq('id', requestId);
+          // Verificar se todos os itens do pedido foram entregues
+          const { data: allEmRotaItems } = await supabase
+            .from('em_rota')
+            .select('status')
+            .eq('request_id', requestId);
+          
+          if (allEmRotaItems) {
+            const allDelivered = allEmRotaItems.every(item => item.status === 'entregue');
+            
+            if (allDelivered) {
+              const { error: requestError } = await supabase
+                .from('requests')
+                .update({ status: 'recebido' })
+                .eq('id', requestId);
 
-          if (requestError) throw requestError;
+              if (requestError) throw requestError;
+            }
+          }
         }
 
         fetchEmRotaItems();
@@ -279,6 +395,17 @@ const EmRota: React.FC = () => {
             size="sm"
             variant="ghost"
             onClick={() => {
+              setSelectedItemForAnimation(record);
+              setShowAnimation(true);
+            }}
+            title="Ver animação de entrega"
+          >
+            <MapPinIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
               setSelectedItem(record);
               setDetailsModalOpen(true);
             }}
@@ -344,6 +471,23 @@ const EmRota: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        {/* Animação de entrega para item selecionado */}
+        {showAnimation && selectedItemForAnimation && (
+          <div className="col-span-full">
+            <DeliveryAnimation
+              fromUnit={selectedItemForAnimation.from_cd_unit.name}
+              toUnit={selectedItemForAnimation.to_unit.name}
+              sentAt={selectedItemForAnimation.sent_at}
+              isDelivered={selectedItemForAnimation.status === 'entregue'}
+              onAnimationComplete={() => {
+                if (selectedItemForAnimation.status === 'em_transito') {
+                  toast.info('⏰ Tempo de entrega estimado atingido! Confirme o recebimento.');
+                }
+              }}
+            />
+          </div>
+        )}
+
         <Card className="p-3 sm:p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
@@ -392,6 +536,27 @@ const EmRota: React.FC = () => {
       </div>
 
       <Card padding={false}>
+        {/* Controles da animação */}
+        {showAnimation && (
+          <div className="p-4 bg-blue-50 border-b border-blue-200">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-medium text-blue-800">
+                🏍️ Rastreamento: {selectedItemForAnimation?.item.name}
+              </h3>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShowAnimation(false);
+                  setSelectedItemForAnimation(null);
+                }}
+              >
+                Fechar Rastreamento
+              </Button>
+            </div>
+          </div>
+        )}
+        
         <Table
           columns={columns}
           data={emRotaItems}

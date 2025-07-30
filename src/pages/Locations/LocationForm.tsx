@@ -58,6 +58,28 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
 
   const onSubmit = async (data: FormData) => {
     try {
+      // Verificar se já existe uma localização com o mesmo nome na mesma unidade
+      const { data: existingLocations, error: checkError } = await supabase
+        .from('locations')
+        .select('id, name, unit_id')
+        .eq('name', data.name)
+        .eq('unit_id', data.unit_id);
+
+      if (checkError) throw checkError;
+
+      // Verificar conflitos (ignorar a própria localização se estiver editando)
+      const hasConflict = existingLocations?.some(existingLocation => {
+        if (location && existingLocation.id === location.id) {
+          return false;
+        }
+        return true;
+      });
+
+      if (hasConflict) {
+        toast.error('Já existe uma localização com este nome nesta unidade');
+        return;
+      }
+
       const locationData = {
         name: data.name,
         description: data.description || null,
@@ -75,7 +97,8 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
             name,
             description,
             unit_id,
-            created_at
+            created_at,
+            unit:units(name)
           `)
           .single();
       } else {
@@ -87,26 +110,15 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
             name,
             description,
             unit_id,
-            created_at
+            created_at,
+            unit:units(name)
           `)
           .single();
       }
 
       if (result.error) throw result.error;
 
-      // Fetch unit name separately
-      const { data: unitData } = await supabase
-        .from('units')
-        .select('name')
-        .eq('id', result.data.unit_id)
-        .single();
-
-      const locationWithUnit = {
-        ...result.data,
-        unit: unitData || { name: 'Unidade não encontrada' }
-      };
-
-      onSave(locationWithUnit);
+      onSave(result.data);
       toast.success(location ? 'Localização atualizada com sucesso!' : 'Localização criada com sucesso!');
     } catch (error: any) {
       console.error('Error saving location:', error);
@@ -125,14 +137,6 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
 
   return (
     <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-        <h4 className="text-sm font-medium text-blue-800 mb-2">📍 Localizações (Departamentos)</h4>
-        <p className="text-xs text-blue-700">
-          Crie localizações específicas para organizar melhor o estoque. 
-          Exemplos: Recepção, Consultório 1, Almoxarifado, Administração, etc.
-        </p>
-      </div>
-
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
           <label htmlFor="name" className="block text-sm font-medium text-gray-700">
@@ -141,7 +145,7 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
           <input
             id="name"
             type="text"
-            placeholder="Ex: Recepção, Consultório 1, Almoxarifado"
+            placeholder="Ex: Consultório 1, Recepção, Almoxarifado"
             className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
               errors.name ? 'border-error-300' : ''
             }`}
@@ -180,7 +184,7 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
             <option value="">Selecione uma unidade</option>
             {units.map((unit) => (
               <option key={unit.id} value={unit.id}>
-                {unit.name}
+                {unit.name} {unit.is_cd ? '(CD)' : ''}
               </option>
             ))}
           </select>
@@ -189,7 +193,7 @@ const LocationForm: React.FC<LocationFormProps> = ({ location, onSave, onCancel 
           )}
           {profile?.role === 'operador-administrativo' && (
             <p className="mt-1 text-xs text-gray-500">
-              Como operador administrativo, você só pode criar localizações na sua unidade
+              Como operador administrativo, você só pode criar localizações para sua unidade
             </p>
           )}
         </div>

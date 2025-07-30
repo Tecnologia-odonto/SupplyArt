@@ -87,7 +87,44 @@ const Requests: React.FC = () => {
       const { data, error } = await query;
 
       if (error) throw error;
-      setRequests(data || []);
+      
+      // Atualizar status dos pedidos baseado em itens em rota
+      const requestsWithUpdatedStatus = await Promise.all((data || []).map(async (request) => {
+        // Verificar se há itens deste pedido em rota
+        const { data: emRotaItems } = await supabase
+          .from('em_rota')
+          .select('status')
+          .eq('request_id', request.id);
+        
+        if (emRotaItems && emRotaItems.length > 0) {
+          const allDelivered = emRotaItems.every(item => item.status === 'entregue');
+          const anyInTransit = emRotaItems.some(item => item.status === 'em_transito');
+          
+          let updatedStatus = request.status;
+          
+          if (allDelivered && request.status === 'enviado') {
+            updatedStatus = 'recebido';
+            // Atualizar no banco de dados
+            await supabase
+              .from('requests')
+              .update({ status: 'recebido' })
+              .eq('id', request.id);
+          } else if (anyInTransit && request.status !== 'enviado') {
+            updatedStatus = 'enviado';
+            // Atualizar no banco de dados
+            await supabase
+              .from('requests')
+              .update({ status: 'enviado' })
+              .eq('id', request.id);
+          }
+          
+          return { ...request, status: updatedStatus };
+        }
+        
+        return request;
+      }));
+      
+      setRequests(requestsWithUpdatedStatus);
     } catch (error) {
       console.error('Error fetching requests:', error);
       toast.error('Erro ao carregar pedidos');

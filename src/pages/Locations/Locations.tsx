@@ -18,7 +18,7 @@ interface Location {
   created_at: string;
   unit: {
     name: string;
-  };
+  } | null;
 }
 
 const Locations: React.FC = () => {
@@ -42,7 +42,8 @@ const Locations: React.FC = () => {
           name,
           description,
           unit_id,
-          created_at
+          created_at,
+          unit:units(name)
         `)
         .order('name');
 
@@ -57,26 +58,7 @@ const Locations: React.FC = () => {
       const { data, error } = await query;
 
       if (error) throw error;
-
-      // Fetch unit names separately to avoid join issues
-      if (data && data.length > 0) {
-        const unitIds = [...new Set(data.map(loc => loc.unit_id))];
-        const { data: unitsData } = await supabase
-          .from('units')
-          .select('id, name')
-          .in('id', unitIds);
-
-        const unitsMap = new Map(unitsData?.map(unit => [unit.id, unit]) || []);
-        
-        const locationsWithUnits = data.map(location => ({
-          ...location,
-          unit: unitsMap.get(location.unit_id) || { name: 'Unidade não encontrada' }
-        }));
-
-        setLocations(locationsWithUnits);
-      } else {
-        setLocations([]);
-      }
+      setLocations(data || []);
     } catch (error) {
       console.error('Error fetching locations:', error);
       toast.error('Erro ao carregar localizações');
@@ -140,7 +122,11 @@ const Locations: React.FC = () => {
     {
       key: 'unit',
       title: 'Unidade',
-      render: (unit: any) => unit?.name || '-'
+      render: (unit: any) => (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+          {unit?.name || 'Unidade não encontrada'}
+        </span>
+      )
     },
     {
       key: 'created_at',

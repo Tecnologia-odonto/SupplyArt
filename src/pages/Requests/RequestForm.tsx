@@ -206,7 +206,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     requestItems.forEach(item => {
       if (item.item_id) {
         const availableStock = cdStockInfo[item.item_id] || 0;
-        const quantityToSend = item.quantity_sent || item.quantity_requested;
+        const quantityToSend = item.quantity_sent || item.quantity_approved || item.quantity_requested;
         
         if (quantityToSend > availableStock) {
           const itemInfo = availableItems.find(i => i.id === item.item_id);
@@ -382,6 +382,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           request_id: requestId,
           item_id: item.item_id,
           quantity_requested: Number(item.quantity_requested),
+          quantity_approved: item.quantity_approved ? Number(item.quantity_approved) : Number(item.quantity_requested),
           quantity_sent: item.quantity_sent ? Number(item.quantity_sent) : null,
           notes: item.notes || null,
           unit_price: item.unit_price ? Number(item.unit_price) : null,
@@ -728,11 +729,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                   {canEditStatus && watchedStatus === 'preparando' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Nova Quantidade *
+                        Quantidade a Enviar *
                       </label>
                       {(() => {
                         const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
-                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_requested;
+                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested;
                         const hasInsufficientStock = quantityToSend > availableStock;
                         
                         return (
@@ -740,15 +741,15 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                             <input
                               type="number"
                               min="1"
-                              max={requestItem.quantity_requested}
-                              value={requestItem.quantity_sent || requestItem.quantity_requested}
+                              max={Math.min(requestItem.quantity_approved || requestItem.quantity_requested, availableStock)}
+                              value={requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested}
                               onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
                               className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
                                 hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
                               }`}
                             />
                             <p className="mt-1 text-xs text-gray-500">
-                              Estoque CD: {availableStock} | Máximo: {requestItem.quantity_requested}
+                              Estoque CD: {availableStock} | Aprovado: {requestItem.quantity_approved || requestItem.quantity_requested}
                             </p>
                             {hasInsufficientStock && (
                               <p className="mt-1 text-xs text-red-600">
@@ -873,11 +874,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                   {canEditStatus && watchedStatus === 'preparando' && (
                     <div className="w-32">
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Nova Qtd *
+                        Qtd a Enviar *
                       </label>
                       {(() => {
                         const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
-                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_requested;
+                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested;
                         const hasInsufficientStock = quantityToSend > availableStock;
                         
                         return (
@@ -885,8 +886,8 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                             <input
                               type="number"
                               min="1"
-                              max={requestItem.quantity_requested}
-                              value={requestItem.quantity_sent || requestItem.quantity_requested}
+                              max={Math.min(requestItem.quantity_approved || requestItem.quantity_requested, availableStock)}
+                              value={requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested}
                               onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
                               className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
                                 hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'

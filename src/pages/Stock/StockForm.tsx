@@ -34,7 +34,7 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
       unit_id: stock?.unit_id || profile?.unit_id || '',
       quantity: stock?.quantity || 0,
       min_quantity: stock?.min_quantity || 0,
-      max_quantity: stock?.max_quantity || 0,
+      max_quantity: stock?.max_quantity || 9999,
       location: stock?.location || '',
     }
   });
@@ -150,6 +150,22 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
 
   const onSubmit = async (data: FormData) => {
     try {
+      // Se uma nova localização foi digitada, criar na tabela de localizações
+      if (data.location && locations.length === 0) {
+        try {
+          await supabase
+            .from('locations')
+            .insert({
+              name: data.location,
+              unit_id: data.unit_id,
+              description: 'Criada automaticamente via estoque'
+            });
+        } catch (locationError) {
+          console.warn('Warning: Could not save location to database:', locationError);
+          // Continuar mesmo se não conseguir salvar a localização
+        }
+      }
+
       // Validação de quantidade máxima
       if (data.max_quantity && data.quantity > data.max_quantity) {
         toast.error(`Quantidade não pode exceder o limite máximo de ${data.max_quantity}`);
@@ -167,7 +183,7 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
 
       let result;
       if (stock) {
-        // Atualizar estoque existente
+        // Atualizar estoque existente - substituir quantidade
         result = await supabase
           .from('stock')
           .update(stockData)
@@ -176,7 +192,7 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
         // Verificar se já existe estoque para este item nesta unidade
         const { data: existingStock, error: checkError } = await supabase
           .from('stock')
-          .select('id')
+          .select('*')
           .eq('item_id', data.item_id)
           .eq('unit_id', data.unit_id)
           .maybeSingle();
@@ -186,11 +202,23 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
         }
 
         if (existingStock) {
-          // Atualizar estoque existente
+          // AGRUPAR: Somar à quantidade existente ao invés de substituir
+          const newQuantity = existingStock.quantity + Number(data.quantity);
+          const updatedStockData = {
+            ...stockData,
+            quantity: newQuantity,
+            // Manter configurações existentes se não foram alteradas
+            min_quantity: data.min_quantity ? Number(data.min_quantity) : existingStock.min_quantity,
+            max_quantity: data.max_quantity ? Number(data.max_quantity) : (existingStock.max_quantity || 9999),
+            location: data.location || existingStock.location,
+          };
+          
           result = await supabase
             .from('stock')
-            .update(stockData)
+            .update(updatedStockData)
             .eq('id', existingStock.id);
+            
+          toast.success(`Quantidade adicionada! Total agora: ${newQuantity}`);
         } else {
           // Criar novo registro de estoque
           result = await supabase
@@ -228,6 +256,14 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
 
   return (
     <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+        <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Sobre o Inventário</h4>
+        <p className="text-xs text-blue-700">
+          <strong>Agrupamento Inteligente:</strong> Se o item já existe nesta unidade, a quantidade será somada ao total existente.
+          Caso contrário, um novo registro será criado. Todas as movimentações são registradas automaticamente.
+        </p>
+      </div>
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
