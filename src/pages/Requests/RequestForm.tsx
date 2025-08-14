@@ -357,6 +357,67 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       if (!hasStock) {
         return; // Modal será exibido, aguardar ação do usuário
       }
+
+      // Se conseguiu passar na verificação de estoque (sem itens em falta),
+      // verificar se há pedidos de compra relacionados que devem ser excluídos
+      if (request?.id) {
+        try {
+          const { data: relatedPurchases, error: purchasesError } = await supabase
+            .from('purchases')
+            .select('id, status')
+            .eq('request_id', request.id)
+            .neq('status', 'finalizado'); // Não excluir compras já finalizadas
+
+          if (purchasesError) throw purchasesError;
+
+          if (relatedPurchases && relatedPurchases.length > 0) {
+            const confirmDelete = window.confirm(
+              `🗑️ Detectamos ${relatedPurchases.length} pedido(s) de compra relacionado(s) a este pedido.\n\n` +
+              `Como agora há estoque suficiente para enviar, deseja excluir automaticamente ` +
+              `os pedidos de compra que não foram finalizados?\n\n` +
+              `⚠️ Esta ação não pode ser desfeita.`
+            );
+
+            if (confirmDelete) {
+              // Excluir itens das compras primeiro (devido às foreign keys)
+              for (const purchase of relatedPurchases) {
+                await supabase
+                  .from('purchase_items')
+                  .delete()
+                  .eq('purchase_id', purchase.id);
+              }
+
+              // Excluir as compras
+              const { error: deleteError } = await supabase
+                .from('purchases')
+                .delete()
+                .eq('request_id', request.id)
+                .neq('status', 'finalizado');
+
+              if (deleteError) throw deleteError;
+
+              // Criar log de auditoria
+              await createAuditLog({
+                action: 'PURCHASES_DELETED_DUE_TO_STOCK_ADJUSTMENT',
+                tableName: 'purchases',
+                recordId: request.id,
+                oldValues: { deleted_purchases: relatedPurchases },
+                newValues: { 
+                  reason: 'Stock became available, purchases no longer needed',
+                  request_id: request.id,
+                  deleted_count: relatedPurchases.length
+                }
+              });
+
+              toast.success(`✅ ${relatedPurchases.length} pedido(s) de compra excluído(s) automaticamente!`);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking/deleting related purchases:', error);
+          // Não falhar o processo principal por causa disso
+          toast.error('Aviso: Erro ao verificar pedidos de compra relacionados');
+        }
+      }
     }
 
     // Se estiver tentando mudar para "enviado", verificar estoque
