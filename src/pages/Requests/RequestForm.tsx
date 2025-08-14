@@ -5,6 +5,7 @@ import { Request, Unit, Item } from '../../types/database';
 import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/UI/Button';
 import Modal from '../../components/UI/Modal';
+import Badge from '../../components/UI/Badge';
 import { createAuditLog } from '../../utils/auditLogger';
 import toast from 'react-hot-toast';
 
@@ -19,58 +20,56 @@ interface FormData {
   cd_unit_id: string;
   priority: 'baixa' | 'normal' | 'alta' | 'urgente';
   notes: string;
-  status: 'solicitado' | 'analisando' | 'aprovado' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
+  status: string;
 }
 
 interface RequestItemForm {
   item_id: string;
   quantity_requested: number;
-  notes: string;
-  unit_price?: number;
-  has_error?: boolean;
-  error_description?: string;
+  notes?: string;
+}
+
+interface InsufficientStockItem {
+  item_id: string;
+  item_name: string;
+  item_code: string;
+  quantity_needed: number;
+  cd_stock_available: number;
+  quantity_missing: number;
+  unit_measure: string;
 }
 
 const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) => {
   const [units, setUnits] = useState<Unit[]>([]);
   const [cdUnits, setCdUnits] = useState<Unit[]>([]);
-  const [availableItems, setAvailableItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [availableItems, setAvailableItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [requestItems, setRequestItems] = useState<RequestItemForm[]>([{ item_id: '', quantity_requested: 1, notes: '' }]);
-  const [cdStockInfo, setCdStockInfo] = useState<Record<string, number>>({});
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [itemsNeedingPurchase, setItemsNeedingPurchase] = useState<any[]>([]);
+  const [requestItems, setRequestItems] = useState<RequestItemForm[]>([{ item_id: '', quantity_requested: 1 }]);
+  const [showInsufficientStockModal, setShowInsufficientStockModal] = useState(false);
+  const [insufficientStockItems, setInsufficientStockItems] = useState<InsufficientStockItem[]>([]);
+  const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
   const { profile } = useAuth();
 
-  const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       requesting_unit_id: request?.requesting_unit_id || profile?.unit_id || '',
       cd_unit_id: request?.cd_unit_id || '',
       priority: request?.priority || 'normal',
       notes: request?.notes || '',
-      status: 'solicitado', // Sempre começar como solicitado
+      status: request?.status || 'solicitado',
     }
   });
 
-  const watchedStatus = watch('status');
   const watchedCdUnitId = watch('cd_unit_id');
+  const watchedStatus = watch('status');
   const isNewRequest = !request;
-  const canEditStatus = !isNewRequest && profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
-  const canEditFinancial = watchedStatus === 'aprovado' && profile?.role && ['admin', 'gestor', 'operador-financeiro'].includes(profile.role);
-  const isFinalized = ['aprovado-unidade', 'cancelado'].includes(watchedStatus);
-  const canEditItems = !isFinalized && watchedStatus !== 'erro-pedido';
-  const canCloseRequest = profile?.role === 'operador-administrativo';
+  const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
+  const canEditItems = !request || ['solicitado', 'analisando', 'aprovado', 'aprovado-pendente'].includes(request.status || '');
 
   useEffect(() => {
     fetchData();
   }, []);
-
-  useEffect(() => {
-    if (watchedCdUnitId) {
-      fetchAvailableItems();
-      fetchCdStockInfo();
-    }
-  }, [watchedCdUnitId]);
 
   useEffect(() => {
     if (request) {
@@ -78,73 +77,32 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
   }, [request]);
 
+  useEffect(() => {
+    if (watchedCdUnitId) {
+      fetchAvailableItems();
+    }
+  }, [watchedCdUnitId, loading]);
+
   const fetchData = async () => {
     try {
-      const [unitsResult] = await Promise.all([
-        supabase.from('units').select('*').order('name')
+      const [unitsResult, cdUnitsResult, itemsResult] = await Promise.all([
+        supabase.from('units').select('*').eq('is_cd', false).order('name'),
+        supabase.from('units').select('*').eq('is_cd', true).order('name'),
+        supabase.from('items').select('*').eq('show_in_company', true).order('name')
       ]);
 
       if (unitsResult.error) throw unitsResult.error;
+      if (cdUnitsResult.error) throw cdUnitsResult.error;
+      if (itemsResult.error) throw itemsResult.error;
 
-      const allUnits = unitsResult.data || [];
-      setUnits(allUnits);
-      setCdUnits(allUnits.filter(unit => unit.is_cd));
+      setUnits(unitsResult.data || []);
+      setCdUnits(cdUnitsResult.data || []);
+      setItems(itemsResult.data || []);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchAvailableItems = async () => {
-    if (!watchedCdUnitId) return;
-
-    try {
-      // Buscar itens que:
-      // 1. Estão marcados como "Exibir na empresa"
-      // 2. Têm estoque disponível no CD selecionado (tabela cd_stock)
-      const { data: stockItems, error } = await supabase
-        .from('cd_stock')
-        .select(`
-          quantity,
-          item:items!inner(*)
-        `)
-        .eq('cd_unit_id', watchedCdUnitId)
-        .eq('item.show_in_company', true)
-        .gte('quantity', 0); // Mostrar todos os itens, mesmo com estoque 0
-
-      if (error) throw error;
-
-      const items = stockItems?.map(stockItem => stockItem.item).filter(Boolean) || [];
-      // Sort items by name on the client side instead of using order() with joined columns
-      items.sort((a, b) => a.name.localeCompare(b.name));
-      setAvailableItems(items);
-    } catch (error) {
-      console.error('Error fetching available items:', error);
-      setAvailableItems([]);
-    }
-  };
-
-  const fetchCdStockInfo = async () => {
-    if (!watchedCdUnitId) return;
-
-    try {
-      const { data: stockData, error } = await supabase
-        .from('cd_stock')
-        .select('item_id, quantity')
-        .eq('cd_unit_id', watchedCdUnitId);
-
-      if (error) throw error;
-
-      const stockMap: Record<string, number> = {};
-      stockData?.forEach(stock => {
-        stockMap[stock.item_id] = stock.quantity;
-      });
-      setCdStockInfo(stockMap);
-    } catch (error) {
-      console.error('Error fetching CD stock info:', error);
-      setCdStockInfo({});
     }
   };
 
@@ -154,7 +112,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     try {
       const { data, error } = await supabase
         .from('request_items')
-        .select('*')
+        .select(`
+          *,
+          item:items(id, name, code, unit_measure)
+        `)
         .eq('request_id', request.id);
 
       if (error) throw error;
@@ -163,10 +124,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         setRequestItems(data.map(item => ({
           item_id: item.item_id,
           quantity_requested: item.quantity_requested,
-          notes: item.notes || '',
-          unit_price: item.unit_price || undefined,
-          has_error: item.has_error || false,
-          error_description: item.error_description || ''
+          notes: item.notes || undefined
         })));
       }
     } catch (error) {
@@ -174,81 +132,153 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
   };
 
-  const addItem = () => {
-    if (!canEditItems) return;
-    setRequestItems([...requestItems, { item_id: '', quantity_requested: 1, notes: '' }]);
-  };
-
-  const removeItem = (index: number) => {
-    if (!canEditItems || requestItems.length <= 1) return;
-    setRequestItems(requestItems.filter((_, i) => i !== index));
-  };
-
-  const updateItem = (index: number, field: string, value: any) => {
-    if (!canEditItems && !canEditFinancial) return;
-    const updated = [...requestItems];
-    updated[index] = { ...updated[index], [field]: value };
-    setRequestItems(updated);
-  };
-
-  const calculateTotal = () => {
-    return requestItems.reduce((sum, item) => {
-      if (item.quantity_requested && item.unit_price) {
-        return sum + (item.quantity_requested * item.unit_price);
-      }
-      return sum;
-    }, 0);
-  };
-
-  const validateStockForSending = () => {
-    const itemsWithInsufficientStock: any[] = [];
-    
-    requestItems.forEach(item => {
-      if (item.item_id) {
-        const availableStock = cdStockInfo[item.item_id] || 0;
-        const quantityToSend = item.quantity_sent || item.quantity_approved || item.quantity_requested;
-        
-        if (quantityToSend > availableStock) {
-          const itemInfo = availableItems.find(i => i.id === item.item_id);
-          itemsWithInsufficientStock.push({
-            ...item,
-            item_info: itemInfo,
-            available_stock: availableStock,
-            quantity_needed: quantityToSend
-          });
-        }
-      }
-    });
-    
-    return itemsWithInsufficientStock;
-  };
-
-  const handleCreatePurchaseForItems = async (items: any[]) => {
-    if (!profile) {
-      toast.error('Usuário não encontrado');
+  const fetchAvailableItems = async () => {
+    if (!watchedCdUnitId) {
+      setAvailableItems([]);
       return;
     }
+
+    try {
+      // Para pedidos existentes, buscar todos os itens (não apenas os com estoque)
+      // Para novos pedidos, buscar apenas itens com estoque
+      let query;
+      
+      if (request) {
+        // Pedido existente: mostrar todos os itens que aparecem na empresa
+        query = supabase
+          .from('items')
+          .select('id, name, code, unit_measure, show_in_company')
+          .eq('show_in_company', true);
+      } else {
+        // Novo pedido: apenas itens com estoque no CD
+        query = supabase
+          .from('cd_stock')
+          .select(`
+            item_id,
+            quantity,
+            item:items(id, name, code, unit_measure, show_in_company)
+          `)
+          .eq('cd_unit_id', watchedCdUnitId)
+          .gt('quantity', 0);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      
+      let itemsWithStock;
+      
+      if (request) {
+        // Para pedidos existentes, buscar estoque separadamente
+        itemsWithStock = await Promise.all((data || []).map(async (item) => {
+          const { data: stockData } = await supabase
+            .from('cd_stock')
+            .select('quantity')
+            .eq('item_id', item.id)
+            .eq('cd_unit_id', watchedCdUnitId)
+            .maybeSingle();
+          
+          return {
+            ...item,
+            cd_stock_quantity: stockData?.quantity || 0
+          };
+        }));
+      } else {
+        // Para novos pedidos, usar dados do cd_stock
+        itemsWithStock = data?.map(stock => ({
+          ...stock.item,
+          cd_stock_quantity: stock.quantity
+        })) || [];
+      }
+      
+      setAvailableItems(itemsWithStock);
+    } catch (error) {
+      console.error('Error fetching available items:', error);
+      setAvailableItems([]);
+    }
+  };
+
+  const checkStockAvailability = async (targetStatus: string) => {
+    if (!watchedCdUnitId || targetStatus !== 'enviado') {
+      return true; // Não precisa verificar estoque para outros status
+    }
+
+    try {
+      const validItems = requestItems.filter(item => item.item_id && item.quantity_requested > 0);
+      const insufficientItems: InsufficientStockItem[] = [];
+
+      for (const item of validItems) {
+        const { data: cdStock, error: stockError } = await supabase
+          .from('cd_stock')
+          .select('quantity')
+          .eq('item_id', item.item_id)
+          .eq('cd_unit_id', watchedCdUnitId)
+          .maybeSingle();
+
+        if (stockError) {
+          console.error('Error checking stock for item:', item.item_id, stockError);
+          toast.error('Erro ao verificar estoque');
+          return false;
+        }
+
+        const availableStock = cdStock?.quantity || 0;
+        const quantityToSend = item.quantity_requested;
+
+        if (quantityToSend > availableStock) {
+          const itemData = items.find(i => i.id === item.item_id);
+          if (itemData) {
+            insufficientItems.push({
+              item_id: item.item_id,
+              item_name: itemData.name,
+              item_code: itemData.code,
+              quantity_needed: quantityToSend,
+              cd_stock_available: availableStock,
+              quantity_missing: quantityToSend - availableStock,
+              unit_measure: itemData.unit_measure
+            });
+          }
+        }
+      }
+
+      if (insufficientItems.length > 0) {
+        setInsufficientStockItems(insufficientItems);
+        setPendingStatusUpdate(targetStatus);
+        setShowInsufficientStockModal(true);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error checking stock availability:', error);
+      toast.error('Erro ao verificar estoque');
+      return false;
+    }
+  };
+
+  const handleCreatePurchaseForMissingItems = async () => {
+    if (!profile || insufficientStockItems.length === 0) return;
 
     try {
       // Criar compra para os itens em falta
       const { data: newPurchase, error: purchaseError } = await supabase
         .from('purchases')
         .insert({
-          unit_id: watchedCdUnitId, // CD faz a compra
+          unit_id: watchedCdUnitId,
           requester_id: profile.id,
           status: 'pedido-realizado',
-          notes: `Compra criada para suprir estoque insuficiente do pedido #${request?.id?.slice(0, 8) || 'novo'}`,
+          notes: `Compra criada automaticamente para envio do pedido #${request?.id.slice(0, 8)} - Estoque insuficiente no CD`,
+          request_id: request?.id,
         })
         .select()
         .single();
 
       if (purchaseError) throw purchaseError;
 
-      // Adicionar itens à compra
-      const purchaseItems = items.map(item => ({
+      // Adicionar itens à compra (apenas a quantidade faltante)
+      const purchaseItems = insufficientStockItems.map(item => ({
         purchase_id: newPurchase.id,
         item_id: item.item_id,
-        quantity: item.quantity_needed - item.available_stock, // Quantidade em falta
+        quantity: item.quantity_missing, // Apenas a quantidade que falta
       }));
 
       const { error: itemsError } = await supabase
@@ -257,13 +287,55 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
       if (itemsError) throw itemsError;
 
-      toast.success(`Pedido de compra criado! ID: ${newPurchase.id.slice(0, 8)}`);
-      setShowPurchaseModal(false);
-      setItemsNeedingPurchase([]);
+      // Atualizar status do pedido para aprovado-pendente
+      const { error: statusError } = await supabase
+        .from('requests')
+        .update({ status: 'aprovado-pendente' })
+        .eq('id', request?.id);
+
+      if (statusError) throw statusError;
+
+      setShowInsufficientStockModal(false);
+      setPendingStatusUpdate(null);
+      setInsufficientStockItems([]);
+      
+      toast.success(`Pedido de compra criado! ID: ${newPurchase.id.slice(0, 8)}. Pedido ficará pendente até a compra ser finalizada.`);
+      onSave();
     } catch (error) {
       console.error('Error creating purchase:', error);
       toast.error('Erro ao criar pedido de compra');
     }
+  };
+
+  const handleAdjustRequest = () => {
+    setShowInsufficientStockModal(false);
+    setPendingStatusUpdate(null);
+    setInsufficientStockItems([]);
+    toast('Ajuste as quantidades dos itens ou adicione observações explicando a situação');
+  };
+
+  const handleCancelStatusChange = () => {
+    setShowInsufficientStockModal(false);
+    setPendingStatusUpdate(null);
+    setInsufficientStockItems([]);
+    // Reverter o status para o valor anterior
+    setValue('status', request?.status || 'solicitado');
+  };
+
+  const addItem = () => {
+    setRequestItems([...requestItems, { item_id: '', quantity_requested: 1 }]);
+  };
+
+  const removeItem = (index: number) => {
+    if (requestItems.length > 1) {
+      setRequestItems(requestItems.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateItem = (index: number, field: string, value: any) => {
+    const updated = [...requestItems];
+    updated[index] = { ...updated[index], [field]: value };
+    setRequestItems(updated);
   };
 
   const onSubmit = async (data: FormData) => {
@@ -274,45 +346,24 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
     // Validar se há pelo menos um item
     const validItems = requestItems.filter(item => item.item_id && item.quantity_requested > 0);
-    if (validItems.length === 0) {
+    if (validItems.length === 0 && isNewRequest) {
       toast.error('Adicione pelo menos um item ao pedido');
       return;
     }
 
-    // Validação especial para status "enviado"
-    if (data.status === 'enviado' && canEditStatus) {
-      const itemsWithInsufficientStock = validateStockForSending();
-      
-      if (itemsWithInsufficientStock.length > 0) {
-        setItemsNeedingPurchase(itemsWithInsufficientStock);
-        setShowPurchaseModal(true);
-        return; // Não continuar com o envio
+    // Se estiver tentando mudar para "enviado", verificar estoque
+    if (data.status === 'enviado' && request?.status !== 'enviado') {
+      const hasStock = await checkStockAvailability(data.status);
+      if (!hasStock) {
+        return; // Modal será exibido, aguardar ação do usuário
       }
     }
 
-    // Validações especiais para status aprovado
-    if (data.status === 'aprovado' && canEditFinancial) {
-      const hasInvalidPrices = validItems.some(item => !item.unit_price || item.unit_price <= 0);
-      if (hasInvalidPrices) {
-        toast.error('Todos os itens devem ter preço unitário definido para aprovar o pedido');
-        return;
-      }
-
-      // Verificar orçamento da unidade
-      const totalValue = calculateTotal();
-      if (totalValue > 0) {
-        const { data: budgetData } = await supabase
-          .from('unit_budgets')
-          .select('available_amount')
-          .eq('unit_id', data.requesting_unit_id)
-          .lte('period_start', new Date().toISOString().split('T')[0])
-          .gte('period_end', new Date().toISOString().split('T')[0])
-          .single();
-
-        if (!budgetData || budgetData.available_amount < totalValue) {
-          toast.error(`Orçamento insuficiente. Valor do pedido: R$ ${totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
-          return;
-        }
+    // Se estiver tentando mudar para "enviado", verificar estoque
+    if (data.status === 'enviado' && request?.status !== 'enviado') {
+      const hasStock = await checkStockAvailability(data.status);
+      if (!hasStock) {
+        return; // Modal será exibido, aguardar ação do usuário
       }
     }
 
@@ -340,15 +391,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         if (error) throw error;
         requestId = request.id;
 
-        // Remover itens existentes se puder editar
-        if (canEditItems || canEditFinancial) {
-          await supabase
-            .from('request_items')
-            .delete()
-            .eq('request_id', request.id);
-        }
-
-        // Criar log de auditoria para atualização
+        // Criar log de auditoria
         await createAuditLog({
           action: 'REQUEST_UPDATED',
           tableName: 'requests',
@@ -362,12 +405,12 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .from('requests')
           .insert(requestData)
           .select()
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         requestId = newRequest.id;
 
-        // Criar log de auditoria para criação
+        // Criar log de auditoria
         await createAuditLog({
           action: 'REQUEST_CREATED',
           tableName: 'requests',
@@ -376,19 +419,22 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         });
       }
 
-      // Inserir/atualizar itens do pedido
-      if (canEditItems || canEditFinancial) {
+      // Inserir/atualizar itens do pedido (apenas se puder editar)
+      if (canEditItems) {
+        // Remover itens existentes se for uma edição
+        if (request) {
+          await supabase
+            .from('request_items')
+            .delete()
+            .eq('request_id', request.id);
+        }
+
+        // Inserir novos itens
         const itemsToInsert = validItems.map(item => ({
           request_id: requestId,
           item_id: item.item_id,
           quantity_requested: Number(item.quantity_requested),
-          quantity_approved: item.quantity_approved ? Number(item.quantity_approved) : Number(item.quantity_requested),
-          quantity_sent: item.quantity_sent ? Number(item.quantity_sent) : null,
           notes: item.notes || null,
-          unit_price: item.unit_price ? Number(item.unit_price) : null,
-          has_error: item.has_error || false,
-          error_description: item.error_description || null,
-          needs_purchase: false, // Será atualizado pelo almoxarife
         }));
 
         const { error: itemsError } = await supabase
@@ -396,48 +442,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .insert(itemsToInsert);
 
         if (itemsError) throw itemsError;
-
-        // Log dos itens
-        await createAuditLog({
-          action: 'REQUEST_ITEMS_UPDATED',
-          tableName: 'request_items',
-          recordId: requestId,
-          newValues: { items: itemsToInsert }
-        });
       }
 
-      // Processar aprovação financeira
-      if (data.status === 'aprovado' && canEditFinancial) {
-        const totalValue = calculateTotal();
-        
-        if (totalValue > 0) {
-          // Criar transação financeira
-          await supabase
-            .from('financial_transactions')
-            .insert({
-              type: 'expense',
-              amount: totalValue,
-              description: `Pedido interno aprovado #${requestId.slice(0, 8)}`,
-              unit_id: data.requesting_unit_id,
-              reference_type: 'request',
-              reference_id: requestId,
-              created_by: profile.id
-            });
-
-          // Atualizar orçamento da unidade
-          await supabase
-            .from('unit_budgets')
-            .update({
-              used_amount: supabase.raw(`used_amount + ${totalValue}`)
-            })
-            .eq('unit_id', data.requesting_unit_id)
-            .lte('period_start', new Date().toISOString().split('T')[0])
-            .gte('period_end', new Date().toISOString().split('T')[0]);
-        }
-      }
-
-      onSave();
       toast.success(request ? 'Pedido atualizado com sucesso!' : 'Pedido criado com sucesso!');
+      onSave();
     } catch (error: any) {
       console.error('Error saving request:', error);
       toast.error(error.message || 'Erro ao salvar pedido');
@@ -455,68 +463,24 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   const statusOptions = [
     { value: 'solicitado', label: 'Solicitado', description: 'Pedido criado e aguardando análise' },
-    { value: 'analisando', label: 'Analisando', description: 'Em análise pelo responsável do CD' },
-    { value: 'aprovado', label: 'Aprovado', description: 'Pedido aprovado com valores definidos' },
-    { value: 'rejeitado', label: 'Rejeitado', description: 'Pedido rejeitado pelo responsável' },
-    { value: 'preparando', label: 'Preparando', description: 'Itens sendo preparados para envio' },
+    { value: 'analisando', label: 'Analisando', description: 'Verificando disponibilidade no CD' },
+    { value: 'aprovado', label: 'Aprovado', description: 'Pedido aprovado e pronto para envio' },
+    { value: 'aprovado-pendente', label: 'Aprovado - Compra Pendente', description: 'Aprovado mas aguardando compra' },
+    { value: 'rejeitado', label: 'Rejeitado', description: 'Pedido rejeitado' },
+    { value: 'preparando', label: 'Preparando', description: 'Separando itens no CD' },
     { value: 'enviado', label: 'Enviado', description: 'Itens enviados para a unidade' },
-    { value: 'recebido', label: 'Recebido', description: 'Itens recebidos pela unidade' },
-    { value: 'aprovado-unidade', label: 'Aprovado pela Unidade', description: 'Unidade confirmou recebimento' },
+    { value: 'recebido', label: 'Recebido', description: 'Itens recebidos na unidade' },
+    { value: 'aprovado-unidade', label: 'Aprovado pela Unidade', description: 'Confirmação final de recebimento' },
     { value: 'erro-pedido', label: 'Erro no Pedido', description: 'Problema identificado no pedido' },
     { value: 'cancelado', label: 'Cancelado', description: 'Pedido cancelado' },
   ];
 
-  const priorityOptions = [
-    { value: 'baixa', label: 'Baixa', description: 'Sem urgência' },
-    { value: 'normal', label: 'Normal', description: 'Prioridade padrão' },
-    { value: 'alta', label: 'Alta', description: 'Necessário em breve' },
-    { value: 'urgente', label: 'Urgente', description: 'Necessário imediatamente' },
-  ];
-
-  const totalValue = calculateTotal();
-
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Status de finalização */}
-      {isFinalized && (
-        <div className={`mb-6 ${watchedStatus === 'cancelado' ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'} border rounded-md p-4`}>
-          <div className="flex items-center">
-            <span className={`${watchedStatus === 'cancelado' ? 'text-red-600' : 'text-green-600'} text-xl mr-3`}>
-              {watchedStatus === 'cancelado' ? '❌' : '✅'}
-            </span>
-            <div>
-              <h4 className={`text-sm font-medium ${watchedStatus === 'cancelado' ? 'text-red-800' : 'text-green-800'}`}>
-                Pedido {watchedStatus === 'cancelado' ? 'Cancelado' : 'Finalizado'}
-              </h4>
-              <p className={`text-sm ${watchedStatus === 'cancelado' ? 'text-red-700' : 'text-green-700'} mt-1`}>
-                {watchedStatus === 'cancelado' 
-                  ? 'Este pedido foi cancelado e não pode mais ser modificado.'
-                  : 'Este pedido foi aprovado pela unidade e está finalizado.'
-                }
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Informação sobre itens disponíveis */}
-      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-md p-4">
-        <h4 className="text-sm font-medium text-blue-800 mb-2">📋 Itens Disponíveis para Pedido</h4>
-        <p className="text-xs text-blue-700">
-          Apenas itens com estoque disponível no CD selecionado e marcados como "Exibir na empresa" 
-          estão disponíveis para pedidos internos.
-        </p>
-        {watchedCdUnitId && (
-          <p className="text-xs text-blue-600 mt-1 font-medium">
-            Itens disponíveis no CD selecionado: {availableItems.length}
-          </p>
-        )}
-      </div>
-
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Informações Básicas */}
         <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Informações do Pedido</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Informações Básicas</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -525,14 +489,14 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </label>
               <select
                 id="requesting_unit_id"
-                disabled={!isNewRequest || isFinalized || profile?.role === 'operador-administrativo'}
+                disabled={!isNewRequest}
                 className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
                   errors.requesting_unit_id ? 'border-error-300' : ''
-                } ${!isNewRequest || isFinalized || profile?.role === 'operador-administrativo' ? 'bg-gray-100' : ''}`}
+                } ${!isNewRequest ? 'bg-gray-100' : ''}`}
                 {...register('requesting_unit_id', { required: 'Unidade solicitante é obrigatória' })}
               >
-                <option value="">Selecione a unidade solicitante</option>
-                {units.filter(unit => !unit.is_cd).map((unit) => (
+                <option value="">Selecione uma unidade</option>
+                {units.map((unit) => (
                   <option key={unit.id} value={unit.id}>
                     {unit.name}
                   </option>
@@ -540,11 +504,6 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </select>
               {errors.requesting_unit_id && (
                 <p className="mt-1 text-sm text-error-600">{errors.requesting_unit_id.message}</p>
-              )}
-              {profile?.role === 'operador-administrativo' && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Como operador administrativo, a unidade solicitante é automaticamente sua unidade
-                </p>
               )}
             </div>
 
@@ -554,13 +513,13 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </label>
               <select
                 id="cd_unit_id"
-                disabled={!isNewRequest || isFinalized}
+                disabled={!isNewRequest}
                 className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
                   errors.cd_unit_id ? 'border-error-300' : ''
-                } ${!isNewRequest || isFinalized ? 'bg-gray-100' : ''}`}
+                } ${!isNewRequest ? 'bg-gray-100' : ''}`}
                 {...register('cd_unit_id', { required: 'Centro de distribuição é obrigatório' })}
               >
-                <option value="">Selecione o CD responsável</option>
+                <option value="">Selecione um CD</option>
                 {cdUnits.map((unit) => (
                   <option key={unit.id} value={unit.id}>
                     {unit.name}
@@ -580,21 +539,19 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               </label>
               <select
                 id="priority"
-                disabled={isFinalized}
                 className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                  isFinalized ? 'bg-gray-100' : ''
+                  errors.priority ? 'border-error-300' : ''
                 }`}
-                {...register('priority')}
+                {...register('priority', { required: 'Prioridade é obrigatória' })}
               >
-                {priorityOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+                <option value="baixa">Baixa</option>
+                <option value="normal">Normal</option>
+                <option value="alta">Alta</option>
+                <option value="urgente">Urgente</option>
               </select>
-              <p className="mt-1 text-xs text-gray-500">
-                {priorityOptions.find(opt => opt.value === watch('priority'))?.description}
-              </p>
+              {errors.priority && (
+                <p className="mt-1 text-sm text-error-600">{errors.priority.message}</p>
+              )}
             </div>
 
             {canEditStatus && (
@@ -627,469 +584,159 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
             <textarea
               id="notes"
               rows={3}
-              disabled={isFinalized}
-              placeholder="Justificativa, urgência, observações especiais..."
-              className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                isFinalized ? 'bg-gray-100' : ''
-              }`}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
               {...register('notes')}
             />
           </div>
         </div>
 
         {/* Itens do Pedido */}
-        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 space-y-2 sm:space-y-0">
-            <h3 className="text-lg font-medium text-gray-900">Itens Solicitados</h3>
-            {canEditItems && (
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={addItem} 
-                size="sm"
-                disabled={availableItems.length === 0}
-              >
-                + Adicionar Item
-              </Button>
+        {(canEditItems || request) && (
+          <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 space-y-2 sm:space-y-0">
+              <h3 className="text-lg font-medium text-gray-900">Itens do Pedido</h3>
+              {canEditItems && (
+                <Button type="button" variant="outline" onClick={addItem} size="sm">
+                  + Adicionar Item
+                </Button>
+              )}
+            </div>
+
+            {!watchedCdUnitId && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                <p className="text-sm text-yellow-700">
+                  ⚠️ Selecione um Centro de Distribuição para ver os itens disponíveis
+                </p>
+              </div>
             )}
-          </div>
 
-          {!watchedCdUnitId && (
-            <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-md p-4">
-              <div className="flex items-center">
-                <span className="text-yellow-600 text-xl mr-3">⚠️</span>
-                <div>
-                  <h4 className="text-sm font-medium text-yellow-800">Selecione um CD</h4>
-                  <p className="text-sm text-yellow-700 mt-1">
-                    Selecione um Centro de Distribuição para ver os itens disponíveis.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {watchedCdUnitId && availableItems.length === 0 && (
-            <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-4">
-              <div className="flex items-center">
-                <span className="text-red-600 text-xl mr-3">❌</span>
-                <div>
-                  <h4 className="text-sm font-medium text-red-800">Nenhum Item Disponível</h4>
-                  <p className="text-sm text-red-700 mt-1">
-                    Não há itens com estoque disponível no CD selecionado que estejam marcados como "Exibir na empresa".
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {requestItems.map((requestItem, index) => (
-              <div key={index} className={`p-4 border rounded-lg ${
-                requestItem.has_error ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'
-              }`}>
-                {/* Mobile layout */}
-                <div className="block sm:hidden space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Item *
-                    </label>
-                    <select
-                      value={requestItem.item_id}
-                      onChange={(e) => updateItem(index, 'item_id', e.target.value)}
-                      disabled={!canEditItems}
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems ? 'bg-gray-100' : ''
-                      }`}
-                    >
-                      <option value="">Selecione um item</option>
-                      {availableItems.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name} ({item.code}) - Estoque CD: {cdStockInfo[item.id] || 0}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Quantidade *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={requestItem.quantity_requested}
-                      onChange={(e) => updateItem(index, 'quantity_requested', Number(e.target.value))}
-                      disabled={!canEditItems}
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  {canEditStatus && watchedStatus === 'preparando' && (
+            <div className="space-y-4">
+              {requestItems.map((requestItem, index) => (
+                <div key={index} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Quantidade a Enviar *
+                        Item *
                       </label>
-                      {(() => {
-                        const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
-                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested;
-                        const hasInsufficientStock = quantityToSend > availableStock;
-                        
-                        return (
-                          <div>
-                            <input
-                              type="number"
-                              min="1"
-                              max={Math.min(requestItem.quantity_approved || requestItem.quantity_requested, availableStock)}
-                              value={requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested}
-                              onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
-                              className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
-                                hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                              }`}
-                            />
-                            <p className="mt-1 text-xs text-gray-500">
-                              Estoque CD: {availableStock} | Aprovado: {requestItem.quantity_approved || requestItem.quantity_requested}
-                            </p>
-                            {hasInsufficientStock && (
-                              <p className="mt-1 text-xs text-red-600">
-                                ⚠️ Estoque insuficiente! Disponível: {availableStock}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      <select
+                        value={requestItem.item_id}
+                        onChange={(e) => updateItem(index, 'item_id', e.target.value)}
+                        disabled={!watchedCdUnitId || !canEditItems}
+                        className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                          !watchedCdUnitId || !canEditItems ? 'bg-gray-100' : ''
+                        }`}
+                      >
+                        <option value="">
+                          {!watchedCdUnitId ? 'Selecione um CD primeiro' : 'Selecione um item'}
+                        </option>
+                        {(request ? items : availableItems).map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} ({item.code})
+                            {item.cd_stock_quantity !== undefined && ` - Estoque: ${item.cd_stock_quantity} ${item.unit_measure}`}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  )}
 
-                  {canEditFinancial && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Preço Unitário (R$) *
+                        Quantidade *
                       </label>
                       <input
                         type="number"
-                        min="0"
-                        step="0.01"
-                        value={requestItem.unit_price || ''}
-                        onChange={(e) => updateItem(index, 'unit_price', e.target.value ? Number(e.target.value) : undefined)}
+                        min="1"
+                        value={requestItem.quantity_requested}
+                        onChange={(e) => updateItem(index, 'quantity_requested', Number(e.target.value))}
+                        disabled={!canEditItems}
                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
                       />
                     </div>
-                  )}
 
-                  {watchedStatus === 'erro-pedido' && canEditStatus && (
-                    <div className="space-y-2">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={requestItem.has_error || false}
-                          onChange={(e) => updateItem(index, 'has_error', e.target.checked)}
-                          className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                        />
-                        <label className="ml-2 block text-sm text-red-900">
-                          Item com erro
-                        </label>
-                      </div>
-                      {requestItem.has_error && (
-                        <input
-                          type="text"
-                          value={requestItem.error_description || ''}
-                          onChange={(e) => updateItem(index, 'error_description', e.target.value)}
-                          placeholder="Descreva o erro (ex: item errado, quantidade incorreta, danificado)"
-                          className="block w-full rounded-md border-red-300 shadow-sm focus:border-red-500 focus:ring-red-500 text-sm"
-                        />
-                      )}
-                    </div>
-                  )}
+                    {requestItems.length > 1 && canEditItems && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => removeItem(index)}
+                      >
+                        Remover
+                      </Button>
+                    )}
+                  </div>
 
-                  <div>
+                  <div className="mt-4">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Observações
+                      Observações do Item
                     </label>
                     <input
                       type="text"
-                      value={requestItem.notes}
+                      value={requestItem.notes || ''}
                       onChange={(e) => updateItem(index, 'notes', e.target.value)}
-                      disabled={!canEditItems && !canEditFinancial}
-                      placeholder="Especificações, observações..."
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems && !canEditFinancial ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  {canEditItems && requestItems.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      onClick={() => removeItem(index)}
-                      className="w-full"
-                    >
-                      Remover Item
-                    </Button>
-                  )}
-                </div>
-
-                {/* Desktop layout */}
-                <div className="hidden sm:flex gap-4 items-end">
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Item *
-                    </label>
-                    <select
-                      value={requestItem.item_id}
-                      onChange={(e) => updateItem(index, 'item_id', e.target.value)}
+                      placeholder="Observações específicas deste item..."
                       disabled={!canEditItems}
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems ? 'bg-gray-100' : ''
-                      }`}
-                    >
-                      <option value="">Selecione um item</option>
-                      {availableItems.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name} ({item.code}) - Estoque CD: {cdStockInfo[item.id] || 0}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="w-24">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Qtd *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={requestItem.quantity_requested}
-                      onChange={(e) => updateItem(index, 'quantity_requested', Number(e.target.value))}
-                      disabled={!canEditItems}
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems ? 'bg-gray-100' : ''
-                      }`}
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
                     />
                   </div>
-
-                  {canEditStatus && watchedStatus === 'preparando' && (
-                    <div className="w-32">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Qtd a Enviar *
-                      </label>
-                      {(() => {
-                        const availableStock = requestItem.item_id ? (cdStockInfo[requestItem.item_id] || 0) : 0;
-                        const quantityToSend = requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested;
-                        const hasInsufficientStock = quantityToSend > availableStock;
-                        
-                        return (
-                          <div>
-                            <input
-                              type="number"
-                              min="1"
-                              max={Math.min(requestItem.quantity_approved || requestItem.quantity_requested, availableStock)}
-                              value={requestItem.quantity_sent || requestItem.quantity_approved || requestItem.quantity_requested}
-                              onChange={(e) => updateItem(index, 'quantity_sent', Number(e.target.value))}
-                              className={`block w-full rounded-md shadow-sm focus:ring-primary-500 text-sm ${
-                                hasInsufficientStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                              }`}
-                            />
-                            <p className="mt-1 text-xs text-gray-500">
-                              CD: {availableStock}
-                            </p>
-                            {hasInsufficientStock && (
-                              <p className="mt-1 text-xs text-red-600">
-                                ⚠️ Insuficiente!
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-
-                  {canEditFinancial && (
-                    <div className="w-32">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Preço Unit. (R$) *
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={requestItem.unit_price || ''}
-                        onChange={(e) => updateItem(index, 'unit_price', e.target.value ? Number(e.target.value) : undefined)}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
-                      />
-                    </div>
-                  )}
-
-                  {watchedStatus === 'erro-pedido' && canEditStatus && (
-                    <div className="w-40">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Erro
-                      </label>
-                      <div className="space-y-1">
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={requestItem.has_error || false}
-                            onChange={(e) => updateItem(index, 'has_error', e.target.checked)}
-                            className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                          />
-                          <label className="ml-2 block text-xs text-red-900">
-                            Com erro
-                          </label>
-                        </div>
-                        {requestItem.has_error && (
-                          <input
-                            type="text"
-                            value={requestItem.error_description || ''}
-                            onChange={(e) => updateItem(index, 'error_description', e.target.value)}
-                            placeholder="Descreva o erro"
-                            className="block w-full rounded-md border-red-300 shadow-sm focus:border-red-500 focus:ring-red-500 text-xs"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Observações
-                    </label>
-                    <input
-                      type="text"
-                      value={requestItem.notes}
-                      onChange={(e) => updateItem(index, 'notes', e.target.value)}
-                      disabled={!canEditItems && !canEditFinancial}
-                      placeholder="Especificações..."
-                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                        !canEditItems && !canEditFinancial ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  {canEditItems && requestItems.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      onClick={() => removeItem(index)}
-                    >
-                      Remover
-                    </Button>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Total Financeiro */}
-          {canEditFinancial && totalValue > 0 && (
-            <div className="mt-4 p-4 rounded-lg bg-primary-50 border border-primary-200">
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-medium text-gray-900">Total do Pedido:</span>
-                <span className="text-xl font-bold text-primary-600">
-                  R$ {totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-primary-600">
-                💰 Este valor será debitado do orçamento da unidade solicitante ao aprovar
-              </p>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Botões de Ação */}
         <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-4">
           <Button type="button" variant="outline" onClick={onCancel} className="w-full sm:w-auto">
             Cancelar
           </Button>
-          {canCloseRequest && (
-            <Button 
-              type="button" 
-              variant="secondary"
-              onClick={() => {
-                // Implementar lógica de fechar pedido
-                toast.success('Pedido fechado! Aguardando aprovação.');
-                onCancel();
-              }}
-              className="w-full sm:w-auto"
-            >
-              Fechar Pedido
-            </Button>
-          )}
-          {!isFinalized && (
-            <Button 
-              type="submit" 
-              loading={isSubmitting} 
-              className="w-full sm:w-auto"
-              disabled={availableItems.length === 0 && canEditItems}
-            >
-              {request ? 'Atualizar' : 'Criar'} Pedido
-            </Button>
-          )}
+          <Button type="submit" loading={isSubmitting} className="w-full sm:w-auto">
+            {request ? 'Atualizar' : 'Criar'} Pedido
+          </Button>
         </div>
       </form>
 
       {/* Modal de Estoque Insuficiente */}
       <Modal
-        isOpen={showPurchaseModal}
-        onClose={() => {
-          setShowPurchaseModal(false);
-          setItemsNeedingPurchase([]);
-        }}
-        title="Estoque Insuficiente no CD"
+        isOpen={showInsufficientStockModal}
+        onClose={handleCancelStatusChange}
+        title="⚠️ Estoque Insuficiente no CD"
         size="lg"
       >
         <div className="space-y-4">
-          <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <div className="flex items-center">
-              <span className="text-red-600 text-xl mr-3">⚠️</span>
-              <div>
-                <h4 className="text-sm font-medium text-red-800">Estoque Insuficiente</h4>
-                <p className="text-sm text-red-700 mt-1">
-                  Alguns itens não possuem estoque suficiente no CD para envio.
-                </p>
-              </div>
-            </div>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+            <h4 className="text-sm font-medium text-yellow-800 mb-2">Não é possível enviar o pedido</h4>
+            <p className="text-xs text-yellow-700">
+              Alguns itens não possuem estoque suficiente no Centro de Distribuição para atender este pedido.
+              Escolha uma das opções abaixo:
+            </p>
           </div>
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Item
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Necessário
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Disponível
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Faltando
-                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Necessário</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Disponível</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Faltando</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {itemsNeedingPurchase.map((item, index) => (
-                  <tr key={index}>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                {insufficientStockItems.map((item) => (
+                  <tr key={item.item_id} className="bg-yellow-50">
+                    <td className="px-4 py-3">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{item.item_info?.name}</div>
-                        <div className="text-sm text-gray-500">{item.item_info?.code}</div>
+                        <div className="text-sm font-medium text-gray-900">{item.item_name}</div>
+                        <div className="text-xs text-gray-500">{item.item_code}</div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {item.quantity_needed}
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {item.quantity_needed} {item.unit_measure}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {item.available_stock}
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {item.cd_stock_available} {item.unit_measure}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">
-                      {item.quantity_needed - item.available_stock}
+                    <td className="px-4 py-3 text-sm font-medium text-red-600">
+                      {item.quantity_missing} {item.unit_measure}
                     </td>
                   </tr>
                 ))}
@@ -1097,34 +744,49 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
             </table>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-4">
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => {
-                setShowPurchaseModal(false);
-                setItemsNeedingPurchase([]);
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button 
-              type="button" 
-              variant="secondary"
-              onClick={() => handleCreatePurchaseForItems(itemsNeedingPurchase)}
-            >
-              Criar Pedido de Compra
-            </Button>
-            <Button 
-              type="button" 
-              onClick={() => {
-                setShowPurchaseModal(false);
-                setItemsNeedingPurchase([]);
-                toast('Ajuste as quantidades e motivos antes de enviar');
-              }}
-            >
-              Ajustar Quantidades
-            </Button>
+          <div className="space-y-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+              <h5 className="text-sm font-medium text-blue-800 mb-2">🛒 Opção 1: Criar Pedido de Compra</h5>
+              <p className="text-xs text-blue-700 mb-3">
+                Criar automaticamente um pedido de compra apenas para as quantidades em falta.
+                O pedido ficará com status "Aprovado-Pendente" até a compra ser finalizada.
+              </p>
+              <Button
+                onClick={handleCreatePurchaseForMissingItems}
+                className="w-full"
+              >
+                🛒 Criar Pedido de Compra para Itens em Falta
+              </Button>
+            </div>
+
+            <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+              <h5 className="text-sm font-medium text-orange-800 mb-2">📝 Opção 2: Ajustar Pedido</h5>
+              <p className="text-xs text-orange-700 mb-3">
+                Voltar ao formulário para diminuir as quantidades dos itens ou adicionar observações
+                explicando a situação para o solicitante.
+              </p>
+              <Button
+                variant="outline"
+                onClick={handleAdjustRequest}
+                className="w-full"
+              >
+                📝 Ajustar Quantidades/Observações
+              </Button>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+              <h5 className="text-sm font-medium text-gray-800 mb-2">❌ Opção 3: Cancelar</h5>
+              <p className="text-xs text-gray-700 mb-3">
+                Cancelar a alteração de status e manter o pedido no status atual.
+              </p>
+              <Button
+                variant="outline"
+                onClick={handleCancelStatusChange}
+                className="w-full"
+              >
+                ❌ Cancelar Alteração de Status
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>

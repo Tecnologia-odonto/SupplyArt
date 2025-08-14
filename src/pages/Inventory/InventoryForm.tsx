@@ -28,6 +28,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [stockQuantity, setStockQuantity] = useState<number>(0);
+  const [availableItemsInStock, setAvailableItemsInStock] = useState<any[]>([]);
 
   const [locations, setLocations] = useState<any[]>([]);
 
@@ -67,6 +68,9 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
     if (watchedItemId && watchedUnitId) {
       fetchStockQuantity();
       fetchLocations();
+    }
+    if (watchedUnitId) {
+      fetchAvailableItemsInStock();
     }
   }, [watchedItemId, watchedUnitId]);
 
@@ -108,13 +112,44 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
     }
   };
 
+  const fetchAvailableItemsInStock = async () => {
+    if (!watchedUnitId) {
+      setAvailableItemsInStock([]);
+      return;
+    }
+
+    try {
+      const { data: stockData, error } = await supabase
+        .from('stock')
+        .select(`
+          item_id,
+          quantity,
+          item:items(id, name, code, unit_measure, has_lifecycle)
+        `)
+        .eq('unit_id', watchedUnitId)
+        .gt('quantity', 0); // Apenas itens com estoque > 0
+
+      if (error) throw error;
+
+      const itemsWithStock = stockData?.map(stock => ({
+        ...stock.item,
+        stock_quantity: stock.quantity
+      })) || [];
+
+      setAvailableItemsInStock(itemsWithStock);
+    } catch (error) {
+      console.error('Error fetching available items in stock:', error);
+      setAvailableItemsInStock([]);
+    }
+  };
+
   const fetchStockQuantity = async () => {
     try {
       const { data, error } = await supabase
         .from('stock')
         .select('quantity')
         .eq('item_id', watchedItemId)
-        .contains('unit_ids', [watchedUnitId])
+        .eq('unit_id', watchedUnitId)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -302,35 +337,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="item_id" className="block text-sm font-medium text-gray-700">
-              Item *
-            </label>
-            <select
-              id="item_id"
-              disabled={!!inventory}
-              className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
-                errors.item_id ? 'border-error-300' : ''
-              } ${inventory ? 'bg-gray-100' : ''}`}
-              {...register('item_id', { required: 'Item é obrigatório' })}
-            >
-              <option value="">Selecione um item</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} ({item.code}) {item.has_lifecycle ? '- Vida Útil' : ''}
-                </option>
-              ))}
-            </select>
-            {errors.item_id && (
-              <p className="mt-1 text-sm text-error-600">{errors.item_id.message}</p>
-            )}
-            {selectedItem?.has_lifecycle && (
-              <p className="mt-1 text-xs text-info-600">
-                ℹ️ Este item possui controle de vida útil e será individualizado
-              </p>
-            )}
-          </div>
-
-          <div>
             <label htmlFor="unit_id" className="block text-sm font-medium text-gray-700">
               Unidade *
             </label>
@@ -353,9 +359,51 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ inventory, onSave, onCanc
               <p className="mt-1 text-sm text-error-600">{errors.unit_id.message}</p>
             )}
           </div>
+
+          <div>
+            <label htmlFor="item_id" className="block text-sm font-medium text-gray-700">
+              Item * {!watchedUnitId && '(Selecione uma unidade primeiro)'}
+            </label>
+            <select
+              id="item_id"
+              disabled={!!inventory || !watchedUnitId}
+              className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+                errors.item_id ? 'border-error-300' : ''
+              } ${inventory || !watchedUnitId ? 'bg-gray-100' : ''}`}
+              {...register('item_id', { required: 'Item é obrigatório' })}
+            >
+              <option value="">
+                {!watchedUnitId ? 'Selecione uma unidade primeiro' : 'Selecione um item'}
+              </option>
+              {watchedUnitId && availableItemsInStock.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} ({item.code}) - Estoque: {item.stock_quantity} {item.unit_measure}
+                  {item.has_lifecycle ? ' - Vida Útil' : ''}
+                </option>
+              ))}
+            </select>
+            {errors.item_id && (
+              <p className="mt-1 text-sm text-error-600">{errors.item_id.message}</p>
+            )}
+            {!watchedUnitId && (
+              <p className="mt-1 text-xs text-blue-600">
+                💡 Primeiro selecione uma unidade para ver os itens disponíveis no estoque
+              </p>
+            )}
+            {watchedUnitId && availableItemsInStock.length === 0 && (
+              <p className="mt-1 text-xs text-red-600">
+                ❌ Nenhum item disponível no estoque desta unidade
+              </p>
+            )}
+            {selectedItem?.has_lifecycle && (
+              <p className="mt-1 text-xs text-info-600">
+                ℹ️ Este item possui controle de vida útil e será individualizado
+              </p>
+            )}
+          </div>
         </div>
 
-        {watchedItemId && watchedUnitId && (
+        {watchedItemId && watchedUnitId && stockQuantity >= 0 && (
           <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
             <p className="text-sm text-gray-700">
               <strong>Estoque disponível:</strong> {stockQuantity} {selectedItem?.unit_measure}

@@ -267,7 +267,7 @@ export type Database = {
           requesting_unit_id: string;
           cd_unit_id: string;
           requester_id: string;
-          status: 'solicitado' | 'analisando' | 'aprovado' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
+          status: 'solicitado' | 'analisando' | 'aprovado' | 'aprovado-pendente' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
           priority: 'baixa' | 'normal' | 'alta' | 'urgente';
           notes: string | null;
           rejection_reason: string | null;
@@ -281,7 +281,7 @@ export type Database = {
           requesting_unit_id: string;
           cd_unit_id: string;
           requester_id: string;
-          status?: 'solicitado' | 'analisando' | 'aprovado' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
+          status?: 'solicitado' | 'analisando' | 'aprovado' | 'aprovado-pendente' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
           priority?: 'baixa' | 'normal' | 'alta' | 'urgente';
           notes?: string | null;
           rejection_reason?: string | null;
@@ -295,7 +295,7 @@ export type Database = {
           requesting_unit_id?: string;
           cd_unit_id?: string;
           requester_id?: string;
-          status?: 'solicitado' | 'analisando' | 'aprovado' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
+          status?: 'solicitado' | 'analisando' | 'aprovado' | 'aprovado-pendente' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
           priority?: 'baixa' | 'normal' | 'alta' | 'urgente';
           notes?: string | null;
           rejection_reason?: string | null;
@@ -656,5 +656,5 @@ export type InventoryItemStatus = 'working' | 'maintenance' | 'broken' | 'dispos
 export type InventoryEventType = 'maintenance' | 'repair' | 'inspection' | 'relocation' | 'status_change' | 'other';
 export type MovementType = 'transfer' | 'adjustment' | 'purchase';
 export type TransactionType = 'income' | 'expense';
-export type RequestStatus = 'solicitado' | 'analisando' | 'aprovado' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
+export type RequestStatus = 'solicitado' | 'analisando' | 'aprovado' | 'aprovado-pendente' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
 export type RequestPriority = 'baixa' | 'normal' | 'alta' | 'urgente';

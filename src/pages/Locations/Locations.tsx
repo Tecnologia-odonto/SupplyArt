@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { PlusIcon, MapPinIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MapPinIcon, FunnelIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import Table from '../../components/UI/Table';
 import Modal from '../../components/UI/Modal';
 import { supabase } from '../../lib/supabase';
+import { Unit } from '../../types/database';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../contexts/AuthContext';
 import LocationForm from './LocationForm';
@@ -23,15 +24,40 @@ interface Location {
 
 const Locations: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
+  const [filters, setFilters] = useState({
+    name: '',
+    description: '',
+    unit_id: ''
+  });
   const permissions = usePermissions();
   const { profile } = useAuth();
 
   useEffect(() => {
+    fetchUnits();
     fetchLocations();
   }, []);
+
+  useEffect(() => {
+    fetchLocations();
+  }, [filters]);
+
+  const fetchUnits = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('units')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+      setUnits(data || []);
+    } catch (error) {
+      console.error('Error fetching units:', error);
+    }
+  };
 
   const fetchLocations = async () => {
     try {
@@ -58,7 +84,29 @@ const Locations: React.FC = () => {
       const { data, error } = await query;
 
       if (error) throw error;
-      setLocations(data || []);
+      
+      let filteredData = data || [];
+      
+      // Aplicar filtros no frontend
+      if (filters.name) {
+        filteredData = filteredData.filter(location => 
+          location.name.toLowerCase().includes(filters.name.toLowerCase())
+        );
+      }
+      
+      if (filters.description) {
+        filteredData = filteredData.filter(location => 
+          location.description?.toLowerCase().includes(filters.description.toLowerCase())
+        );
+      }
+      
+      if (filters.unit_id) {
+        filteredData = filteredData.filter(location => 
+          location.unit_id === filters.unit_id
+        );
+      }
+      
+      setLocations(filteredData);
     } catch (error) {
       console.error('Error fetching locations:', error);
       toast.error('Erro ao carregar localizações');
@@ -186,6 +234,73 @@ const Locations: React.FC = () => {
           </Button>
         )}
       </div>
+
+      {/* Filtros */}
+      <Card>
+        <div className="flex items-center mb-4">
+          <FunnelIcon className="w-5 h-5 text-primary-600 mr-2" />
+          <h3 className="text-lg font-medium text-gray-900">Filtros</h3>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label htmlFor="filter_name" className="block text-sm font-medium text-gray-700 mb-1">
+              Nome
+            </label>
+            <input
+              id="filter_name"
+              type="text"
+              value={filters.name}
+              onChange={(e) => setFilters(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Filtrar por nome..."
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="filter_description" className="block text-sm font-medium text-gray-700 mb-1">
+              Descrição
+            </label>
+            <input
+              id="filter_description"
+              type="text"
+              value={filters.description}
+              onChange={(e) => setFilters(prev => ({ ...prev, description: e.target.value }))}
+              placeholder="Filtrar por descrição..."
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="filter_unit" className="block text-sm font-medium text-gray-700 mb-1">
+              Unidade
+            </label>
+            <select
+              id="filter_unit"
+              value={filters.unit_id}
+              onChange={(e) => setFilters(prev => ({ ...prev, unit_id: e.target.value }))}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+            >
+              <option value="">Todas as unidades</option>
+              {units.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex items-end">
+            <Button
+              variant="outline"
+              onClick={() => setFilters({ name: '', description: '', unit_id: '' })}
+              className="w-full"
+            >
+              Limpar Filtros
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>

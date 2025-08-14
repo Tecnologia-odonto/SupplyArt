@@ -29,15 +29,46 @@ interface RequestItemWithDetails {
   };
 }
 
+interface PurchaseHistory {
+  id: string;
+  status: string;
+  created_at: string;
+  total_value: number | null;
+  supplier: {
+    name: string;
+  } | null;
+}
 const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApprove, onReject }) => {
   const [requestItems, setRequestItems] = useState<RequestItemWithDetails[]>([]);
+  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const { profile } = useAuth();
 
   useEffect(() => {
     fetchRequestItems();
+    fetchPurchaseHistory();
   }, [request.id]);
 
+  const fetchPurchaseHistory = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('purchases')
+        .select(`
+          id,
+          status,
+          created_at,
+          total_value,
+          supplier:suppliers(name)
+        `)
+        .eq('request_id', request.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPurchaseHistory(data || []);
+    } catch (error) {
+      console.error('Error fetching purchase history:', error);
+    }
+  };
   const fetchRequestItems = async () => {
     try {
       const { data, error } = await supabase
@@ -68,7 +99,7 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
               .select('quantity')
               .eq('item_id', item.item_id)
               .eq('cd_unit_id', profile.unit_id)
-              .single();
+              .maybeSingle();
 
             return {
               ...item,
@@ -141,6 +172,7 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
       'solicitado': { variant: 'info' as const, label: 'Solicitado' },
       'analisando': { variant: 'warning' as const, label: 'Analisando' },
       'aprovado': { variant: 'success' as const, label: 'Aprovado' },
+      'aprovado-pendente': { variant: 'warning' as const, label: 'Aprovado - Compra Pendente' },
       'rejeitado': { variant: 'error' as const, label: 'Rejeitado' },
       'preparando': { variant: 'info' as const, label: 'Preparando' },
       'enviado': { variant: 'success' as const, label: 'Enviado' },
@@ -184,6 +216,22 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
         </div>
       )}
 
+      {request.status === 'aprovado-pendente' && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+          <div className="flex items-center">
+            <CheckIcon className="h-5 w-5 text-yellow-600 mr-2" />
+            <div>
+              <h4 className="text-sm font-medium text-yellow-800">Pedido Aprovado - Compra Pendente</h4>
+              <p className="text-sm text-yellow-700 mt-1">
+                Aprovado por {request.approved_by_profile?.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
+              </p>
+              <p className="text-sm text-yellow-700 mt-1">
+                ⏳ Aguardando finalização de pedido(s) de compra para poder enviar
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {request.status === 'rejeitado' && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <div className="flex items-center">
@@ -408,15 +456,44 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
       </Card>
 
       {/* Histórico de Ações */}
-      {(request.status === 'aprovado' || request.status === 'rejeitado') && (
+      {(request.status === 'aprovado' || request.status === 'aprovado-pendente' || request.status === 'rejeitado') && (
         <Card>
           <h3 className="text-lg font-medium text-gray-900 mb-4">Histórico de Ações</h3>
           <div className="space-y-3">
+            {/* Histórico de compras relacionadas */}
+            {purchaseHistory.length > 0 && (
+              <>
+                {purchaseHistory.map((purchase) => (
+                  <div key={purchase.id} className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 w-2 h-2 bg-orange-400 rounded-full mt-2"></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-gray-600">
+                        🛒 Pedido de compra criado devido à falta de estoque (#{purchase.id.slice(0, 8)})
+                        {purchase.supplier && ` - Fornecedor: ${purchase.supplier.name}`}
+                        {purchase.total_value && ` - Valor: R$ ${purchase.total_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                      </p>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className="text-xs text-gray-400">
+                          {new Date(purchase.created_at).toLocaleString('pt-BR')}
+                        </span>
+                        <Badge 
+                          variant={purchase.status === 'finalizado' ? 'success' : 'warning'} 
+                          size="sm"
+                        >
+                          {purchase.status === 'finalizado' ? 'Finalizada' : 'Pendente'}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            
             <div className="flex items-start space-x-3">
               <div className="flex-shrink-0 w-2 h-2 bg-primary-400 rounded-full mt-2"></div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-gray-600">
-                  Pedido {request.status === 'aprovado' ? 'aprovado' : 'rejeitado'} por {request.approved_by_profile?.name}
+                  Pedido {request.status.includes('aprovado') ? 'aprovado' : 'rejeitado'} por {request.approved_by_profile?.name}
                 </p>
                 <span className="text-xs text-gray-400">{new Date(request.approved_at).toLocaleString('pt-BR')}</span>
               </div>

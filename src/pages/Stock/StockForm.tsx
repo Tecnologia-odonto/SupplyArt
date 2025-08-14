@@ -204,6 +204,13 @@ const StockForm: React.FC<StockFormProps> = ({ stock, onSave, onCancel }) => {
         if (existingStock) {
           // AGRUPAR: Somar à quantidade existente ao invés de substituir
           const newQuantity = existingStock.quantity + Number(data.quantity);
+          
+          // Verificar se a nova quantidade seria negativa
+          if (newQuantity < 0) {
+            toast.error(`❌ Operação resultaria em estoque negativo! Estoque atual: ${existingStock.quantity}, tentando adicionar: ${data.quantity}`);
+            return;
+          }
+          
           const updatedStockData = {
             ...stockData,
             quantity: newQuantity,

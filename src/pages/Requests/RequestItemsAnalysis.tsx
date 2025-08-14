@@ -60,13 +60,13 @@ const RequestItemsAnalysis: React.FC<RequestItemsAnalysisProps> = ({
           .select('quantity')
           .eq('item_id', item.item_id)
           .eq('cd_unit_id', cdUnitId)
-          .single();
+          .limit(1);
 
         return {
           ...item,
-          cd_stock_available: stockData?.quantity || 0,
+          cd_stock_available: stockData && stockData.length > 0 ? stockData[0].quantity : 0,
           quantity_approved: item.quantity_approved || item.quantity_requested,
-          needs_purchase: item.needs_purchase || (stockData?.quantity || 0) < item.quantity_requested
+          needs_purchase: item.needs_purchase || (stockData && stockData.length > 0 ? stockData[0].quantity : 0) < item.quantity_requested
         };
       }));
 

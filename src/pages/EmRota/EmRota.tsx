@@ -267,9 +267,8 @@ const EmRota: React.FC = () => {
           if (movementError) throw movementError;
         }
 
-        // Se houver request_id, atualizar status do pedido para 'recebido'
+        // Se houver request_id, verificar se todos os itens foram entregues
         if (requestId) {
-          // Verificar se todos os itens do pedido foram entregues
           const { data: allEmRotaItems } = await supabase
             .from('em_rota')
             .select('status')
@@ -279,12 +278,15 @@ const EmRota: React.FC = () => {
             const allDelivered = allEmRotaItems.every(item => item.status === 'entregue');
             
             if (allDelivered) {
+              // Todos os itens foram entregues, marcar pedido como recebido
               const { error: requestError } = await supabase
                 .from('requests')
                 .update({ status: 'recebido' })
                 .eq('id', requestId);
 
               if (requestError) throw requestError;
+              
+              toast.success('🎉 Todos os itens do pedido foram entregues! Pedido marcado como recebido.');
             }
           }
         }

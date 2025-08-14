@@ -88,8 +88,40 @@ const Requests: React.FC = () => {
 
       if (error) throw error;
       
-      // Atualizar status dos pedidos baseado em itens em rota
+      // Verificar status de compras pendentes para pedidos aprovados
       const requestsWithUpdatedStatus = await Promise.all((data || []).map(async (request) => {
+        if (request.status === 'aprovado') {
+          // Verificar se há compras relacionadas a este pedido
+          const { data: relatedPurchases } = await supabase
+            .from('purchases')
+            .select('status')
+            .eq('request_id', request.id);
+          
+          if (relatedPurchases && relatedPurchases.length > 0) {
+            const hasPendingPurchases = relatedPurchases.some(purchase => 
+              purchase.status !== 'finalizado'
+            );
+            
+            if (hasPendingPurchases) {
+              // Atualizar status para aprovado-pendente
+              await supabase
+                .from('requests')
+                .update({ status: 'aprovado-pendente' })
+                .eq('id', request.id);
+              
+              return { ...request, status: 'aprovado-pendente' };
+            } else {
+              // Todas as compras foram finalizadas, voltar para aprovado
+              return request;
+            }
+          }
+        }
+        
+        return request;
+      }));
+      
+      // Atualizar status dos pedidos baseado em itens em rota
+      const requestsWithUpdatedStatus2 = await Promise.all(requestsWithUpdatedStatus.map(async (request) => {
         // Verificar se há itens deste pedido em rota
         const { data: emRotaItems } = await supabase
           .from('em_rota')
@@ -124,7 +156,7 @@ const Requests: React.FC = () => {
         return request;
       }));
       
-      setRequests(requestsWithUpdatedStatus);
+      setRequests(requestsWithUpdatedStatus2);
     } catch (error) {
       console.error('Error fetching requests:', error);
       toast.error('Erro ao carregar pedidos');
@@ -227,6 +259,7 @@ const Requests: React.FC = () => {
       'solicitado': { variant: 'info' as const, label: 'Solicitado' },
       'analisando': { variant: 'warning' as const, label: 'Analisando' },
       'aprovado': { variant: 'success' as const, label: 'Aprovado' },
+      'aprovado-pendente': { variant: 'warning' as const, label: 'Aprovado - Compra Pendente' },
       'rejeitado': { variant: 'error' as const, label: 'Rejeitado' },
       'preparando': { variant: 'info' as const, label: 'Preparando' },
       'enviado': { variant: 'success' as const, label: 'Enviado' },
@@ -485,7 +518,7 @@ const Requests: React.FC = () => {
             <div className="ml-2 sm:ml-3 min-w-0 flex-1">
               <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">Aprovados</p>
               <p className="text-sm sm:text-lg font-semibold text-gray-900">
-                {statusCounts['aprovado'] || 0}
+                {(statusCounts['aprovado'] || 0) + (statusCounts['aprovado-pendente'] || 0)}
               </p>
             </div>
           </div>
