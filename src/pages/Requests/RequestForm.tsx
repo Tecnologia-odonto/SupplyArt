@@ -184,60 +184,76 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           };
         }));
       } else {
-        // Para novos pedidos, usar dados do cd_stock
-        itemsWithStock = data?.map(stock => ({
-          ...stock.item,
-          cd_stock_quantity: stock.quantity
-        })) || [];
+        // Para novos pedidos, os dados já vêm com estoque
+        itemsWithStock = (data || []).map(stockItem => ({
+          id: stockItem.item.id,
+          name: stockItem.item.name,
+          code: stockItem.item.code,
+          unit_measure: stockItem.item.unit_measure,
+          cd_stock_quantity: stockItem.quantity
+        }));
       }
       
       setAvailableItems(itemsWithStock);
     } catch (error) {
       console.error('Error fetching available items:', error);
-      setAvailableItems([]);
+      toast.error('Erro ao carregar itens disponíveis');
     }
   };
 
   const checkStockAvailability = async (targetStatus: string) => {
-    if (!watchedCdUnitId || targetStatus !== 'enviado') {
-      return true; // Não precisa verificar estoque para outros status
-    }
+    if (!request || targetStatus !== 'enviado') return true;
 
     try {
-      const validItems = requestItems.filter(item => item.item_id && item.quantity_requested > 0);
+      // Buscar itens do pedido
+      const { data: requestItemsData, error: itemsError } = await supabase
+        .from('request_items')
+        .select(`
+          *,
+          item:items(id, name, code, unit_measure)
+        `)
+        .eq('request_id', request.id);
+
+      if (itemsError) throw itemsError;
+
+      if (!requestItemsData || requestItemsData.length === 0) {
+        toast.error('Nenhum item encontrado no pedido');
+        return false;
+      }
+
       const insufficientItems: InsufficientStockItem[] = [];
 
-      for (const item of validItems) {
-        const { data: cdStock, error: stockError } = await supabase
+      // Verificar estoque para cada item
+      for (const requestItem of requestItemsData) {
+        const quantityNeeded = requestItem.quantity_approved || requestItem.quantity_requested;
+
+        const { data: stockData, error: stockError } = await supabase
           .from('cd_stock')
           .select('quantity')
-          .eq('item_id', item.item_id)
+          .eq('item_id', requestItem.item_id)
           .eq('cd_unit_id', watchedCdUnitId)
           .maybeSingle();
 
-        if (stockError) {
-          console.error('Error checking stock for item:', item.item_id, stockError);
-          toast.error('Erro ao verificar estoque');
-          return false;
-        }
+        if (stockError) throw stockError;
 
-        const availableStock = cdStock?.quantity || 0;
-        const quantityToSend = item.quantity_requested;
+        const availableStock = stockData?.quantity || 0;
 
-        if (quantityToSend > availableStock) {
-          const itemData = items.find(i => i.id === item.item_id);
-          if (itemData) {
-            insufficientItems.push({
-              item_id: item.item_id,
-              item_name: itemData.name,
-              item_code: itemData.code,
-              quantity_needed: quantityToSend,
-              cd_stock_available: availableStock,
-              quantity_missing: quantityToSend - availableStock,
-              unit_measure: itemData.unit_measure
-            });
-          }
+        if (quantityNeeded > availableStock) {
+          insufficientItems.push({
+            item_id: requestItem.item_id,
+            item_name: requestItem.item.name,
+            item_code: requestItem.item.code,
+            quantity_needed: quantityNeeded,
+            cd_stock_available: availableStock,
+            quantity_missing: quantityNeeded - availableStock,
+            unit_measure: requestItem.item.unit_measure
+          });
         }
+      }
+
+      if (insufficientItems.length > 0) {
+        // Processar envio do pedido (criar registros em_rota)
+        await processRequestSending(request?.id || requestId, data.cd_unit_id, data.requesting_unit_id);
       }
 
       if (insufficientItems.length > 0) {
@@ -320,6 +336,146 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     setInsufficientStockItems([]);
     // Reverter o status para o valor anterior
     setValue('status', request?.status || 'solicitado');
+  };
+
+  const processRequestSending = async (requestId: string, cdUnitId: string, requestingUnitId: string) => {
+    try {
+      // Buscar itens do pedido
+      const { data: requestItems, error: itemsError } = await supabase
+        .from('request_items')
+        .select('*')
+        .eq('request_id', requestId);
+
+      if (itemsError) throw itemsError;
+
+      if (!requestItems || requestItems.length === 0) {
+        toast.error('Nenhum item encontrado no pedido');
+        return;
+      }
+
+      // Para cada item, criar registro em em_rota e atualizar estoques
+      for (const item of requestItems) {
+        const quantityToSend = item.quantity_approved || item.quantity_requested;
+
+        // Verificar estoque no CD
+        const { data: cdStock, error: stockError } = await supabase
+          .from('cd_stock')
+          .select('quantity')
+          .eq('item_id', item.item_id)
+          .eq('cd_unit_id', cdUnitId)
+          .maybeSingle();
+
+        if (stockError) throw stockError;
+
+        const availableStock = cdStock?.quantity || 0;
+        if (quantityToSend > availableStock) {
+          toast.error(`Estoque insuficiente para ${item.item.name}: disponível ${availableStock}, necessário ${quantityToSend}`);
+          continue;
+        }
+
+        // Criar registro em em_rota
+        const { error: emRotaError } = await supabase
+          .from('em_rota')
+          .insert({
+            item_id: item.item_id,
+            from_cd_unit_id: cdUnitId,
+            to_unit_id: requestingUnitId,
+            quantity: quantityToSend,
+            request_id: requestId,
+            status: 'em_transito',
+            notes: `Enviado via pedido interno #${requestId.slice(0, 8)}`
+          });
+
+        if (emRotaError) throw emRotaError;
+
+        // Subtrair do estoque do CD
+        const { error: updateStockError } = await supabase
+          .from('cd_stock')
+          .update({
+            quantity: availableStock - quantityToSend
+          })
+          .eq('item_id', item.item_id)
+          .eq('cd_unit_id', cdUnitId);
+
+        if (updateStockError) throw updateStockError;
+
+        // Atualizar quantity_sent no request_item
+        const { error: updateItemError } = await supabase
+          .from('request_items')
+          .update({
+            quantity_sent: quantityToSend
+          })
+          .eq('id', item.id);
+
+        if (updateItemError) throw updateItemError;
+      }
+
+      // Verificar se há pedidos de compra relacionados que devem ser excluídos
+      if (request?.id) {
+        try {
+          const { data: relatedPurchases, error: purchasesError } = await supabase
+            .from('purchases')
+            .select('id, status')
+            .eq('request_id', request.id)
+            .neq('status', 'finalizado'); // Não excluir compras já finalizadas
+
+          if (purchasesError) throw purchasesError;
+
+          if (relatedPurchases && relatedPurchases.length > 0) {
+            const confirmDelete = window.confirm(
+              `🗑️ Detectamos ${relatedPurchases.length} pedido(s) de compra relacionado(s) a este pedido.\n\n` +
+              `Como agora há estoque suficiente para enviar, deseja excluir automaticamente ` +
+              `os pedidos de compra que não foram finalizados?\n\n` +
+              `⚠️ Esta ação não pode ser desfeita.`
+            );
+
+            if (confirmDelete) {
+              // Excluir itens das compras primeiro (devido às foreign keys)
+              for (const purchase of relatedPurchases) {
+                await supabase
+                  .from('purchase_items')
+                  .delete()
+                  .eq('purchase_id', purchase.id);
+              }
+
+              // Excluir as compras
+              const { error: deleteError } = await supabase
+                .from('purchases')
+                .delete()
+                .eq('request_id', request.id)
+                .neq('status', 'finalizado');
+
+              if (deleteError) throw deleteError;
+
+              // Criar log de auditoria
+              await createAuditLog({
+                action: 'PURCHASES_DELETED_DUE_TO_STOCK_ADJUSTMENT',
+                tableName: 'purchases',
+                recordId: request.id,
+                oldValues: { deleted_purchases: relatedPurchases },
+                newValues: { 
+                  reason: 'Stock became available, purchases no longer needed',
+                  request_id: request.id,
+                  deleted_count: relatedPurchases.length
+                }
+              });
+
+              toast.success(`✅ ${relatedPurchases.length} pedido(s) de compra excluído(s) automaticamente!`);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking/deleting related purchases:', error);
+          // Não falhar o processo principal por causa disso
+          toast.error('Aviso: Erro ao verificar pedidos de compra relacionados');
+        }
+      }
+
+      toast.success('🚚 Pedido enviado! Itens adicionados à rota de entrega.');
+    } catch (error) {
+      console.error('Error processing request sending:', error);
+      toast.error('Erro ao processar envio do pedido');
+      throw error;
+    }
   };
 
   const addItem = () => {
@@ -420,14 +576,6 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       }
     }
 
-    // Se estiver tentando mudar para "enviado", verificar estoque
-    if (data.status === 'enviado' && request?.status !== 'enviado') {
-      const hasStock = await checkStockAvailability(data.status);
-      if (!hasStock) {
-        return; // Modal será exibido, aguardar ação do usuário
-      }
-    }
-
     try {
       const oldValues = request ? { ...request } : null;
       
@@ -503,6 +651,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .insert(itemsToInsert);
 
         if (itemsError) throw itemsError;
+      }
+
+      // Processar envio do pedido (criar registros em_rota)
+      if (data.status === 'enviado' && request?.status !== 'enviado') {
+        await processRequestSending(requestId, data.cd_unit_id, data.requesting_unit_id);
       }
 
       toast.success(request ? 'Pedido atualizado com sucesso!' : 'Pedido criado com sucesso!');
