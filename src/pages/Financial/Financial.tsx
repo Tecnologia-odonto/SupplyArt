@@ -91,15 +91,14 @@ const Financial: React.FC = () => {
           .lte('created_at', endDate + 'T23:59:59')
           .order('created_at', { ascending: false }),
         
-        // Buscar orçamentos que incluem a data selecionada
+        // Buscar todos os orçamentos que se sobrepõem ao período selecionado
         supabase
           .from('unit_budgets')
           .select(`
             *,
             unit:units(name, is_cd)
           `)
-          .lte('period_start', budgetPeriodFilter)
-          .gte('period_end', budgetPeriodFilter)
+          .or(`and(period_start.lte.${budgetPeriodFilter},period_end.gte.${budgetPeriodFilter})`)
           .order('created_at', { ascending: false }),
 
         // Buscar todas as unidades para verificar quais não têm orçamento
@@ -115,8 +114,42 @@ const Financial: React.FC = () => {
 
       setTransactions(transactionsResult.data || []);
       
-      // Sort budgets by unit name on the client side
-      const sortedBudgets = (budgetsResult.data || []).sort((a, b) => 
+      // Agrupar orçamentos por unidade e somar valores
+      const budgetsByUnit = (budgetsResult.data || []).reduce((acc, budget) => {
+        const unitId = budget.unit_id;
+        if (!acc[unitId]) {
+          acc[unitId] = {
+            id: budget.id, // Usar o ID do primeiro orçamento encontrado
+            unit_id: unitId,
+            unit: budget.unit,
+            budget_amount: 0,
+            used_amount: 0,
+            available_amount: 0,
+            period_start: budget.period_start,
+            period_end: budget.period_end,
+            created_at: budget.created_at,
+            updated_at: budget.updated_at
+          };
+        }
+        
+        // Somar valores dos orçamentos
+        acc[unitId].budget_amount += budget.budget_amount;
+        acc[unitId].used_amount += budget.used_amount;
+        acc[unitId].available_amount += budget.available_amount;
+        
+        // Usar as datas mais amplas (menor start, maior end)
+        if (budget.period_start < acc[unitId].period_start) {
+          acc[unitId].period_start = budget.period_start;
+        }
+        if (budget.period_end > acc[unitId].period_end) {
+          acc[unitId].period_end = budget.period_end;
+        }
+        
+        return acc;
+      }, {} as Record<string, any>);
+      
+      // Converter de volta para array e ordenar por nome da unidade
+      const sortedBudgets = Object.values(budgetsByUnit).sort((a, b) => 
         a.unit?.name?.localeCompare(b.unit?.name || '') || 0
       );
       setBudgets(sortedBudgets);

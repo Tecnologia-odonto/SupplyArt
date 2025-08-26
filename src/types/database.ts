@@ -234,6 +234,7 @@ export type Database = {
           notes: string | null;
           event_date: string;
           next_action_date: string | null;
+          supplier_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -246,6 +247,7 @@ export type Database = {
           notes?: string | null;
           event_date?: string;
           next_action_date?: string | null;
+          supplier_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -258,6 +260,7 @@ export type Database = {
           notes?: string | null;
           event_date?: string;
           next_action_date?: string | null;
+          supplier_id?: string | null;
           created_at?: string;
         };
       };
@@ -398,6 +401,7 @@ export type Database = {
           quantity: number;
           unit_price: number | null;
           total_price: number | null;
+          supplier_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -407,6 +411,7 @@ export type Database = {
           quantity: number;
           unit_price?: number | null;
           total_price?: number | null;
+          supplier_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -416,6 +421,7 @@ export type Database = {
           quantity?: number;
           unit_price?: number | null;
           total_price?: number | null;
+          supplier_id?: string | null;
           created_at?: string;
         };
       };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
+import { Supplier } from '../../types/database';
 import Button from '../../components/UI/Button';
 import toast from 'react-hot-toast';
 
@@ -19,6 +20,7 @@ interface FormData {
   cost: number;
   notes: string;
   next_action_date: string;
+  supplier_id: string;
 }
 
 const InventoryItemForm: React.FC<InventoryItemFormProps> = ({ 
@@ -28,7 +30,8 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
   onSave, 
   onCancel 
 }) => {
-  const [loading, setLoading] = useState(false);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
@@ -38,8 +41,30 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
       cost: inventoryItem?.cost || 0,
       notes: inventoryItem?.notes || '',
       next_action_date: inventoryItem?.next_action_date || '',
+      supplier_id: inventoryItem?.supplier_id || '',
     }
   });
+
+  useEffect(() => {
+    fetchSuppliers();
+  }, []);
+
+  const fetchSuppliers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setSuppliers(data || []);
+    } catch (error) {
+      console.error('Error fetching suppliers:', error);
+      toast.error('Erro ao carregar fornecedores');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const onSubmit = async (data: FormData) => {
     try {
@@ -51,6 +76,7 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
         cost: data.cost > 0 ? Number(data.cost) : null,
         notes: data.notes || null,
         next_action_date: data.next_action_date || null,
+        supplier_id: data.supplier_id || null,
         event_date: new Date().toISOString().split('T')[0],
       };
 
@@ -75,6 +101,15 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
       toast.error(error.message || 'Erro ao salvar evento');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <span className="ml-2 text-gray-600">Carregando...</span>
+      </div>
+    );
+  }
 
   const eventTypes = [
     { value: 'maintenance', label: 'Manutenção' },
@@ -129,6 +164,24 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
               {...register('performed_by')}
             />
+          </div>
+
+          <div>
+            <label htmlFor="supplier_id" className="block text-sm font-medium text-gray-700">
+              Fornecedor
+            </label>
+            <select
+              id="supplier_id"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+              {...register('supplier_id')}
+            >
+              <option value="">Selecione um fornecedor</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

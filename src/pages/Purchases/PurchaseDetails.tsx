@@ -13,6 +13,9 @@ interface PurchaseItemWithDetails {
   quantity: number;
   unit_price: number | null;
   total_price: number | null;
+  supplier: {
+    name: string;
+  } | null;
   item: {
     code: string;
     name: string;
@@ -34,6 +37,7 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
         .from('purchase_items')
         .select(`
           *,
+          supplier:suppliers(name),
           item:items(code, name, unit_measure)
         `)
         .eq('purchase_id', purchase.id);
@@ -153,6 +157,9 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
                       Item
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Fornecedor
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Quantidade
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -176,6 +183,9 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
                           <div className="text-sm font-medium text-gray-900">{item.item.name}</div>
                           <div className="text-sm text-gray-500">{item.item.code}</div>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {item.supplier?.name || '-'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {item.quantity} {item.item.unit_measure}
@@ -202,7 +212,7 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
                 </tbody>
                 <tfoot className="bg-gray-50">
                   <tr>
-                    <td colSpan={isFinalized ? 4 : 3} className="px-6 py-3 text-right text-sm font-medium text-gray-900">
+                    <td colSpan={isFinalized ? 5 : 4} className="px-6 py-3 text-right text-sm font-medium text-gray-900">
                       Total Geral:
                     </td>
                     <td className="px-6 py-3 text-sm font-medium text-gray-900">
@@ -232,6 +242,10 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
                     <div>
                       <span className="font-medium text-gray-500">Quantidade:</span>
                       <div className="text-gray-900">{item.quantity} {item.item.unit_measure}</div>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-500">Fornecedor:</span>
+                      <div className="text-gray-900">{item.supplier?.name || '-'}</div>
                     </div>
                     <div>
                       <span className="font-medium text-gray-500">Preço Unit.:</span>

@@ -25,6 +25,7 @@ interface PurchaseItemForm {
   item_id: string;
   quantity: number;
   unit_price?: number;
+  supplier_id?: string;
 }
 
 interface UnitBudgetInfo {
@@ -146,7 +147,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
     try {
       const { data, error } = await supabase
         .from('purchase_items')
-        .select('*')
+        .select('*, supplier:suppliers(name)')
         .eq('purchase_id', purchase.id);
 
       if (error) throw error;
@@ -155,7 +156,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
         setPurchaseItems(data.map(item => ({
           item_id: item.item_id,
           quantity: item.quantity,
-          unit_price: item.unit_price || undefined
+          unit_price: item.unit_price || undefined,
+          supplier_id: item.supplier_id || undefined
         })));
       }
     } catch (error) {
@@ -351,6 +353,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
           quantity: Number(item.quantity),
           unit_price: item.unit_price ? Number(item.unit_price) : null,
           total_price: item.unit_price && item.quantity ? Number(item.unit_price) * Number(item.quantity) : null,
+          supplier_id: item.supplier_id || null,
         }));
 
         const { error: itemsError } = await supabase
@@ -663,6 +666,27 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Fornecedor
+                      </label>
+                      <select
+                        value={purchaseItem.supplier_id || ''}
+                        onChange={(e) => updateItem(index, 'supplier_id', e.target.value || undefined)}
+                        disabled={isFinalized || (!isNewPurchase && !canEditFinancialInfo)}
+                        className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                          isFinalized ? 'bg-gray-100' : ''
+                        }`}
+                      >
+                        <option value="">Selecione fornecedor</option>
+                        {suppliers.map((supplier) => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     {canEditFinancialInfo && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -747,6 +771,27 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                         isFinalized ? 'bg-gray-100' : ''
                       }`}
                     />
+                  </div>
+
+                  <div className="w-40">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fornecedor
+                    </label>
+                    <select
+                      value={purchaseItem.supplier_id || ''}
+                      onChange={(e) => updateItem(index, 'supplier_id', e.target.value || undefined)}
+                      disabled={isFinalized || (!isNewPurchase && !canEditFinancialInfo)}
+                      className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                        isFinalized ? 'bg-gray-100' : ''
+                      }`}
+                    >
+                      <option value="">Fornecedor</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {canEditFinancialInfo && (
