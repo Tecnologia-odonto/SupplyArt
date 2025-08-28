@@ -115,10 +115,6 @@ const ResetPassword: React.FC = () => {
       // Fazer logout completo e redirecionar para login
       await supabase.auth.signOut();
       
-      // Limpar qualquer estado de autenticação
-      localStorage.clear();
-      sessionStorage.clear();
-      
       setTimeout(() => {
         navigate('/login');
       }, 2000);

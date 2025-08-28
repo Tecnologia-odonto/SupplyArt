@@ -22,7 +22,7 @@ export const createAuditLog = async ({
     let currentUserId = userId;
     if (!currentUserId) {
       const { data: { user } } = await supabase.auth.getUser();
-      currentUserId = user?.id || '00000000-0000-0000-0000-000000000000';
+      currentUserId = user?.id || null;
     }
 
     await supabase.from('audit_logs').insert({

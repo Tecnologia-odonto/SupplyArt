@@ -525,7 +525,7 @@ export type Database = {
       audit_logs: {
         Row: {
           id: string;
-          user_id: string;
+          user_id: string | null;
           action: string;
           table_name: string;
           record_id: string | null;
@@ -535,7 +535,7 @@ export type Database = {
         };
         Insert: {
           id?: string;
-          user_id: string;
+          user_id: string | null;
           action: string;
           table_name: string;
           record_id?: string | null;
@@ -545,7 +545,7 @@ export type Database = {
         };
         Update: {
           id?: string;
-          user_id?: string;
+          user_id?: string | null;
           action?: string;
           table_name?: string;
           record_id?: string | null;

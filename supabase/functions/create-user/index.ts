@@ -6,9 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 }
 
-// System UUID for operations performed by the system
-const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -154,7 +151,7 @@ Deno.serve(async (req) => {
       const { error: auditError } = await supabaseClient
         .from('audit_logs')
         .insert({
-          user_id: SYSTEM_USER_ID,
+          user_id: null,
           action: 'USER_CREATED_BY_ADMIN',
           table_name: 'profiles',
           record_id: authData.user.id,

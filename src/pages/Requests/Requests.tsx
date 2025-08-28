@@ -135,12 +135,21 @@ const Requests: React.FC = () => {
           let updatedStatus = request.status;
           
           if (allDelivered && request.status === 'enviado') {
-            updatedStatus = 'recebido';
-            // Atualizar no banco de dados
+            // Primeiro marcar como recebido
             await supabase
               .from('requests')
               .update({ status: 'recebido' })
               .eq('id', request.id);
+            
+            // Depois finalizar automaticamente
+            setTimeout(async () => {
+              await supabase
+                .from('requests')
+                .update({ status: 'aprovado-unidade' })
+                .eq('id', request.id);
+            }, 500);
+            
+            updatedStatus = 'recebido';
           } else if (anyInTransit && request.status !== 'enviado') {
             updatedStatus = 'enviado';
             // Atualizar no banco de dados
@@ -178,7 +187,9 @@ const Requests: React.FC = () => {
           .update({
             status: 'aprovado',
             approved_by: profile?.id,
-            approved_at: new Date().toISOString()
+            approved_at: new Date().toISOString(),
+            budget_consumed: false,
+            budget_consumption_date: null
           })
           .eq('id', requestId);
 
@@ -192,7 +203,9 @@ const Requests: React.FC = () => {
           newValues: {
             status: 'aprovado',
             approved_by: profile?.id,
-            approved_at: new Date().toISOString()
+            approved_at: new Date().toISOString(),
+            budget_consumed: false,
+            budget_consumption_date: null
           }
         });
 

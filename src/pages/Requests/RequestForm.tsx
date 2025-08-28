@@ -43,6 +43,8 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   const [units, setUnits] = useState<Unit[]>([]);
   const [cdUnits, setCdUnits] = useState<Unit[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [cdStock, setCdStock] = useState<any[]>([]);
+  const [unitBudget, setUnitBudget] = useState<any>(null);
   const [availableItems, setAvailableItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [requestItems, setRequestItems] = useState<RequestItemForm[]>([{ item_id: '', quantity_requested: 1 }]);
@@ -63,13 +65,21 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   const watchedCdUnitId = watch('cd_unit_id');
   const watchedStatus = watch('status');
+  const watchedRequestingUnitId = watch('requesting_unit_id');
   const isNewRequest = !request;
   const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
   const canEditItems = !request || ['solicitado', 'analisando', 'aprovado', 'aprovado-pendente'].includes(request.status || '');
 
   useEffect(() => {
     fetchData();
+    fetchCdStock();
   }, []);
+
+  useEffect(() => {
+    if (watchedRequestingUnitId) {
+      fetchUnitBudget(watchedRequestingUnitId);
+    }
+  }, [watchedRequestingUnitId]);
 
   useEffect(() => {
     if (request) {
@@ -173,25 +183,38 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         itemsWithStock = await Promise.all((data || []).map(async (item) => {
           const { data: stockData } = await supabase
             .from('cd_stock')
-            .select('quantity')
+            .select('quantity, unit_price')
             .eq('item_id', item.id)
             .eq('cd_unit_id', watchedCdUnitId)
             .maybeSingle();
           
           return {
             ...item,
-            cd_stock_quantity: stockData?.quantity || 0
+            cd_stock_quantity: stockData?.quantity || 0,
+            cd_unit_price: stockData?.unit_price || 0
           };
         }));
       } else {
         // Para novos pedidos, os dados já vêm com estoque
-        itemsWithStock = (data || []).map(stockItem => ({
+        const itemsWithPrices = await Promise.all((data || []).map(async (stockItem) => {
+          const { data: priceData } = await supabase
+            .from('cd_stock')
+            .select('unit_price')
+            .eq('item_id', stockItem.item.id)
+            .eq('cd_unit_id', watchedCdUnitId)
+            .maybeSingle();
+
+          return {
           id: stockItem.item.id,
           name: stockItem.item.name,
           code: stockItem.item.code,
           unit_measure: stockItem.item.unit_measure,
-          cd_stock_quantity: stockItem.quantity
+          cd_stock_quantity: stockItem.quantity,
+          cd_unit_price: priceData?.unit_price || 0
+          };
         }));
+        
+        itemsWithStock = itemsWithPrices;
       }
       
       setAvailableItems(itemsWithStock);
@@ -418,7 +441,59 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
   };
 
+  const fetchCdStock = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cd_stock')
+        .select(`
+          *,
+          items:item_id (
+            id,
+            code,
+            name,
+            unit_measure
+          ),
+          units:cd_unit_id (
+            id,
+            name
+          )
+        `)
+        .gt('quantity', 0);
+
+      if (error) throw error;
+      setCdStock(data || []);
+    } catch (error) {
+      console.error('Error fetching CD stock:', error);
+      toast.error('Erro ao carregar estoque do CD');
+    }
+  };
+
+  const fetchUnitBudget = async (unitId: string) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { data, error } = await supabase
+        .from('unit_budgets')
+        .select('*')
+        .eq('unit_id', unitId)
+        .lte('period_start', today)
+        .gte('period_end', today)
+        .maybeSingle();
+
+      if (error) throw error;
+      setUnitBudget(data);
+    } catch (error) {
+      console.error('Error fetching unit budget:', error);
+    }
+  };
+
   const addItem = () => {
+    // Verificar se a unidade tem orçamento antes de permitir adicionar itens
+    if (!unitBudget) {
+      toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
+      return;
+    }
+
     setRequestItems([...requestItems, { item_id: '', quantity_requested: 1 }]);
   };
 
@@ -430,7 +505,31 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   const updateItem = (index: number, field: string, value: any) => {
     const updated = [...requestItems];
-    updated[index] = { ...updated[index], [field]: value };
+    
+    if (field === 'item_id') {
+      // Buscar preço do item no estoque do CD
+      const stockItem = cdStock.find(stock => stock.item_id === value);
+      if (stockItem) {
+        updated[index] = { 
+          ...updated[index], 
+          [field]: value,
+          estimated_unit_price: stockItem.unit_price || 0
+        };
+        updated[index].estimated_total_price = (stockItem.unit_price || 0) * updated[index].quantity_requested;
+      } else {
+        updated[index] = { ...updated[index], [field]: value };
+      }
+    } else if (field === 'quantity_requested') {
+      const quantity = parseFloat(value) || 0;
+      updated[index] = { 
+        ...updated[index], 
+        [field]: quantity,
+        estimated_total_price: (updated[index].estimated_unit_price || 0) * quantity
+      };
+    } else {
+      updated[index] = { ...updated[index], [field]: value };
+    }
+    
     setRequestItems(updated);
   };
 
@@ -441,7 +540,23 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
 
     // Validar se há pelo menos um item
+  const getTotalEstimatedCost = () => {
+    return requestItems.reduce((total, item) => total + (item.estimated_total_price || 0), 0);
+  };
+
     const validItems = requestItems.filter(item => item.item_id && item.quantity_requested > 0);
+    // Verificar orçamento antes de criar o pedido
+    if (!unitBudget) {
+      toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
+      return;
+    }
+
+    const totalCost = getTotalEstimatedCost();
+    if (totalCost > unitBudget.available_amount) {
+      toast.error(`Orçamento insuficiente. Custo estimado: R$ ${totalCost.toFixed(2)}, Disponível: R$ ${unitBudget.available_amount.toFixed(2)}`);
+      return;
+    }
+
     if (validItems.length === 0 && isNewRequest) {
       toast.error('Adicione pelo menos um item ao pedido');
       return;
@@ -469,6 +584,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         requesting_unit_id: data.requesting_unit_id,
         cd_unit_id: data.cd_unit_id,
         requester_id: profile.id,
+        total_estimated_cost: totalCost,
         priority: data.priority,
         notes: data.notes || null,
         status: canEditStatus ? data.status : (request?.status || 'solicitado'),
@@ -593,9 +709,71 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     { value: 'cancelado', label: 'Cancelado', description: 'Pedido cancelado' },
   ];
 
+  const getTotalEstimatedCost = () => {
+    return requestItems.reduce((total, item) => total + (item.estimated_total_price || 0), 0);
+  };
+
+  const totalEstimatedCost = getTotalEstimatedCost();
+  const hasBudget = unitBudget !== null;
+  const budgetSufficient = hasBudget && totalEstimatedCost <= unitBudget.available_amount;
+  const budgetExceeded = hasBudget && totalEstimatedCost > unitBudget.available_amount;
+
   return (
     <div className="max-w-4xl mx-auto">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        {/* Alerta de Orçamento */}
+        {watchedRequestingUnitId && !hasBudget && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <span className="text-red-600 text-xl">❌</span>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Sem Orçamento Configurado</h3>
+                <p className="text-sm text-red-700 mt-1">
+                  A unidade selecionada não possui orçamento configurado para o período atual. 
+                  Configure um orçamento no módulo financeiro antes de criar pedidos.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {watchedRequestingUnitId && hasBudget && budgetExceeded && totalEstimatedCost > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <span className="text-yellow-600 text-xl">⚠️</span>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-yellow-800">Orçamento Insuficiente</h3>
+                <p className="text-sm text-yellow-700 mt-1">
+                  O custo estimado do pedido (R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) 
+                  excede o orçamento disponível da unidade (R$ {unitBudget.available_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {watchedRequestingUnitId && hasBudget && budgetSufficient && totalEstimatedCost > 0 && (
+          <div className="bg-green-50 border border-green-200 rounded-md p-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <span className="text-green-600 text-xl">✅</span>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-green-800">Orçamento Suficiente</h3>
+                <p className="text-sm text-green-700 mt-1">
+                  Orçamento disponível: R$ {unitBudget.available_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | 
+                  Custo do pedido: R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | 
+                  Restará: R$ {(unitBudget.available_amount - totalEstimatedCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Informações Básicas */}
         <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Informações Básicas</h3>
@@ -720,6 +898,14 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               )}
             </div>
 
+            {!watchedRequestingUnitId && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-sm text-blue-700">
+                  💡 Selecione uma unidade solicitante para verificar o orçamento disponível
+                </p>
+              </div>
+            )}
+
             {!watchedCdUnitId && (
               <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                 <p className="text-sm text-yellow-700">
@@ -739,13 +925,15 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       <select
                         value={requestItem.item_id}
                         onChange={(e) => updateItem(index, 'item_id', e.target.value)}
-                        disabled={!watchedCdUnitId || !canEditItems}
+                        disabled={!watchedCdUnitId || !canEditItems || !hasBudget}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                          !watchedCdUnitId || !canEditItems ? 'bg-gray-100' : ''
+                          !watchedCdUnitId || !canEditItems || !hasBudget ? 'bg-gray-100' : ''
                         }`}
                       >
                         <option value="">
-                          {!watchedCdUnitId ? 'Selecione um CD primeiro' : 'Selecione um item'}
+                          {!watchedCdUnitId ? 'Selecione um CD primeiro' : 
+                           !hasBudget ? 'Configure orçamento da unidade primeiro' : 
+                           'Selecione um item'}
                         </option>
                         {(request ? items : availableItems).map((item) => (
                           <option key={item.id} value={item.id}>
@@ -765,7 +953,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                         min="1"
                         value={requestItem.quantity_requested}
                         onChange={(e) => updateItem(index, 'quantity_requested', Number(e.target.value))}
-                        disabled={!canEditItems}
+                        disabled={!canEditItems || !hasBudget}
                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
                       />
                     </div>
@@ -791,7 +979,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                       value={requestItem.notes || ''}
                       onChange={(e) => updateItem(index, 'notes', e.target.value)}
                       placeholder="Observações específicas deste item..."
-                      disabled={!canEditItems}
+                      disabled={!canEditItems || !hasBudget}
                       className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
                     />
                   </div>
@@ -801,12 +989,65 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           </div>
         )}
 
+        {requestItems.length > 0 && (
+          <div className={`border rounded-lg p-4 ${
+            !hasBudget ? 'bg-red-50 border-red-200' :
+            budgetExceeded ? 'bg-yellow-50 border-yellow-200' :
+            'bg-gray-50 border-gray-200'
+          }`}>
+            <h3 className="text-sm font-medium text-gray-800 mb-3">Resumo do Pedido</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span>Total de itens:</span>
+                <span className="font-medium">{requestItems.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Custo total estimado:</span>
+                <span className={`font-medium ${budgetExceeded ? 'text-red-600' : 'text-gray-900'}`}>
+                  R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              {unitBudget && (
+                <>
+                  <div className="flex justify-between">
+                    <span>Orçamento disponível:</span>
+                    <span className="font-medium text-blue-600">
+                      R$ {unitBudget.available_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Orçamento após pedido:</span>
+                    <span className={`font-medium ${
+                      (unitBudget.available_amount - totalEstimatedCost) >= 0 
+                        ? 'text-green-600' 
+                        : 'text-red-600'
+                    }`}>
+                      R$ {(unitBudget.available_amount - totalEstimatedCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </>
+              )}
+              {!hasBudget && (
+                <div className="flex justify-between">
+                  <span>Status do orçamento:</span>
+                  <span className="font-medium text-red-600">❌ Não configurado</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Botões de Ação */}
         <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-4">
           <Button type="button" variant="outline" onClick={onCancel} className="w-full sm:w-auto">
             Cancelar
           </Button>
-          <Button type="submit" loading={isSubmitting} className="w-full sm:w-auto">
+          <Button 
+            type="submit" 
+            loading={isSubmitting} 
+            disabled={!hasBudget || budgetExceeded}
+            className="w-full sm:w-auto"
+          >
             {request ? 'Atualizar' : 'Criar'} Pedido
           </Button>
         </div>

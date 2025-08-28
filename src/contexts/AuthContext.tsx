@@ -32,7 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createAuditLog = async (action: string, userId?: string, details?: any) => {
     try {
       await supabase.from('audit_logs').insert({
-        user_id: userId || '00000000-0000-0000-0000-000000000000',
+        user_id: userId || null,
         action,
         table_name: 'auth',
         record_id: userId || null,

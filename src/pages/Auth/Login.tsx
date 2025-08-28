@@ -57,7 +57,7 @@ const Login: React.FC = () => {
       // Create audit log for failed login attempt
       try {
         await supabase.from('audit_logs').insert({
-          user_id: '00000000-0000-0000-0000-000000000000', // Anonymous user for failed attempts
+          user_id: null, // Anonymous user for failed attempts
           action: 'LOGIN_FAILED',
           table_name: 'auth',
           record_id: null,

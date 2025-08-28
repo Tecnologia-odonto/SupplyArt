@@ -99,7 +99,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       const currentDate = new Date().toISOString().split('T')[0];
       
       const [unitsResult, suppliersResult, itemsResult, budgetsResult] = await Promise.all([
-        supabase.from('units').select('*').order('name'),
+        // Buscar apenas Centros de Distribuição
+        supabase.from('units').select('*').eq('is_cd', true).order('name'),
         supabase.from('suppliers').select('*').order('name'),
         // Filtrar apenas itens que devem ser exibidos na empresa
         supabase.from('items').select('*').eq('show_in_company', true).order('name'),
@@ -473,7 +474,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="unit_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Unidade *
+                Centro de Distribuição
               </label>
               <select
                 id="unit_id"
@@ -483,8 +484,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                 } ${!isNewPurchase || isFinalized ? 'bg-gray-100' : ''}`}
                 {...register('unit_id', { required: 'Unidade é obrigatória' })}
               >
-                <option value="">Selecione uma unidade</option>
-                {units.map((unit) => (
+                <option value="">Selecione um Centro de Distribuição</option>
+                {units.filter(unit => unit.is_cd).map((unit) => (
                   <option key={unit.id} value={unit.id}>
                     {unit.name} {unit.is_cd ? '(CD)' : ''}
                   </option>
