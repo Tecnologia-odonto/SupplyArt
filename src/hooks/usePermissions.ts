@@ -49,7 +49,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canManageUsers: true,
     canAccessFinancial: true,
     canAccessInventory: true,
-    canAccessPurchases: true,
+    canAccessPurchases: false, // Gestores não fazem mais compras
     canAccessMovements: true,
     canAccessLogs: true,
     canAccessAllUnits: true,
@@ -68,7 +68,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canManageUsers: false,
     canAccessFinancial: true,
     canAccessInventory: false,
-    canAccessPurchases: true,
+    canAccessPurchases: false, // Não pode mais acessar compras
     canAccessMovements: false,
     canAccessLogs: false,
     canAccessAllUnits: false,
@@ -87,7 +87,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canManageUsers: false,
     canAccessFinancial: false,
     canAccessInventory: true,
-    canAccessPurchases: true,
+    canAccessPurchases: false, // Não pode mais acessar compras
     canAccessMovements: false,
     canAccessLogs: false,
     canAccessAllUnits: false,
@@ -106,7 +106,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canManageUsers: false,
     canAccessFinancial: false,
     canAccessInventory: true,
-    canAccessPurchases: false,
+    canAccessPurchases: true, // Almoxarife pode fazer compras
     canAccessMovements: false,
     canAccessLogs: false,
     canAccessAllUnits: true,

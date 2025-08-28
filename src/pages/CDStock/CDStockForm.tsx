@@ -19,6 +19,7 @@ interface FormData {
   min_quantity: number;
   max_quantity: number;
   location: string;
+  unit_price: number;
 }
 
 const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) => {
@@ -35,6 +36,7 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
       min_quantity: stock?.min_quantity || 0,
       max_quantity: stock?.max_quantity || 9999,
       location: stock?.location || 'Estoque CD',
+      unit_price: stock?.unit_price || 0,
     }
   });
 
@@ -98,6 +100,8 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
         min_quantity: data.min_quantity ? Number(data.min_quantity) : null,
         max_quantity: data.max_quantity ? Number(data.max_quantity) : null,
         location: data.location || 'Estoque CD',
+        unit_price: Number(data.unit_price),
+        price_updated_by: profile?.id,
       };
 
       let result;
@@ -137,6 +141,8 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
             min_quantity: data.min_quantity ? Number(data.min_quantity) : existingStock.min_quantity,
             max_quantity: data.max_quantity ? Number(data.max_quantity) : (existingStock.max_quantity || 9999),
             location: data.location || existingStock.location,
+            unit_price: Number(data.unit_price),
+            price_updated_by: profile?.id,
           };
           
           result = await supabase
@@ -308,6 +314,31 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
               {...register('max_quantity')}
             />
           </div>
+        </div>
+
+        <div>
+          <label htmlFor="unit_price" className="block text-sm font-medium text-gray-700">
+            Preço Unitário (R$) *
+          </label>
+          <input
+            id="unit_price"
+            type="number"
+            min="0"
+            step="0.01"
+            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+              errors.unit_price ? 'border-error-300' : ''
+            }`}
+            {...register('unit_price', { 
+              required: 'Preço unitário é obrigatório',
+              min: { value: 0, message: 'Preço deve ser maior ou igual a zero' }
+            })}
+          />
+          {errors.unit_price && (
+            <p className="mt-1 text-sm text-error-600">{errors.unit_price.message}</p>
+          )}
+          <p className="mt-1 text-xs text-gray-500">
+            Este preço será usado para calcular o custo dos pedidos das unidades
+          </p>
         </div>
 
         <div>

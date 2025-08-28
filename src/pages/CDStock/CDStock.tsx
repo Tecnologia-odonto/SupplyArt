@@ -18,6 +18,8 @@ interface CDStockWithDetails {
   min_quantity: number | null;
   max_quantity: number | null;
   location: string | null;
+  unit_price: number;
+  last_price_update: string;
   item: {
     code: string;
     name: string;
@@ -227,6 +229,29 @@ const CDStock: React.FC = () => {
       key: 'location',
       title: 'Localização',
       render: (value: string) => value || 'Estoque CD'
+    },
+    {
+      key: 'unit_price',
+      title: 'Preço Unitário',
+      render: (value: number) => (
+        <div>
+          <span className="font-medium text-primary-600">
+            R$ {value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </span>
+          {value === 0 && (
+            <div className="text-xs text-error-600 mt-1">⚠️ Sem preço</div>
+          )}
+        </div>
+      )
+    },
+    {
+      key: 'last_price_update',
+      title: 'Última Atualização',
+      render: (value: string) => (
+        <span className="text-xs text-gray-500">
+          {new Date(value).toLocaleDateString('pt-BR')}
+        </span>
+      )
     },
     {
       key: 'status',

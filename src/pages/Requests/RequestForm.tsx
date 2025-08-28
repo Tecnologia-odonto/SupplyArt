@@ -524,12 +524,27 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
             .eq('request_id', request.id);
         }
 
-        // Inserir novos itens
-        const itemsToInsert = validItems.map(item => ({
+        // Inserir novos itens com preços estimados do CD
+        const itemsToInsert = await Promise.all(validItems.map(async (item) => {
+          // Buscar preço do item no CD
+          const { data: cdStockData } = await supabase
+            .from('cd_stock')
+            .select('unit_price')
+            .eq('item_id', item.item_id)
+            .eq('cd_unit_id', data.cd_unit_id)
+            .maybeSingle();
+          
+          const unitPrice = cdStockData?.unit_price || 0;
+          const totalPrice = unitPrice * item.quantity_requested;
+          
+          return {
           request_id: requestId,
           item_id: item.item_id,
           quantity_requested: Number(item.quantity_requested),
+          estimated_unit_price: unitPrice,
+          estimated_total_price: totalPrice,
           notes: item.notes || null,
+          };
         }));
 
         const { error: itemsError } = await supabase

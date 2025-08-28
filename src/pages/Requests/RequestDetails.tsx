@@ -22,6 +22,8 @@ interface RequestItemWithDetails {
   cd_stock_available: number | null;
   needs_purchase: boolean;
   notes: string | null;
+  estimated_unit_price: number;
+  estimated_total_price: number;
   item: {
     code: string;
     name: string;
@@ -289,6 +291,15 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
             <div className="mt-1">{getStatusBadge(request.status)}</div>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-500">Custo Total Estimado</label>
+            <p className="mt-1 text-lg font-semibold text-primary-600">
+              R$ {(request.total_estimated_cost || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+            {request.budget_consumed && (
+              <p className="text-xs text-green-600 mt-1">✅ Orçamento já consumido</p>
+            )}
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-500">Unidade Solicitante</label>
             <p className="mt-1 text-sm text-gray-900">{request.requesting_unit?.name}</p>
           </div>
@@ -360,6 +371,12 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Qtd. Solicitada
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Preço Unit.
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Total Estimado
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Estoque CD

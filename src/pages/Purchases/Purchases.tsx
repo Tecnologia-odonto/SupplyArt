@@ -57,17 +57,16 @@ const Purchases: React.FC = () => {
         .order('created_at', { ascending: false });
 
       // Aplicar filtros baseados no role do usuário
-      if (profile?.role === 'gestor' && profile.unit_id) {
-        // Gestor: apenas da sua unidade
+      if (profile?.role === 'operador-almoxarife' && profile.unit_id) {
+        // Op. Almoxarife: apenas compras do seu CD
         query = query.eq('unit_id', profile.unit_id);
-      } else if (profile?.role === 'operador-administrativo') {
-        // Op. Administrativo: apenas seus próprios pedidos
-        query = query.eq('requester_id', profile.id);
-      } else if (profile?.role === 'operador-financeiro' && profile.unit_id) {
-        // Op. Financeiro: todos da sua unidade
-        query = query.eq('unit_id', profile.unit_id);
+      } else if (profile?.role === 'admin') {
+        // Admin: todas as compras
+        // Sem filtro adicional
+      } else {
+        // Outros roles não podem acessar compras (apenas CDs fazem compras)
+        query = query.eq('unit_id', '00000000-0000-0000-0000-000000000000'); // Filtro que não retorna nada
       }
-      // Admin e Op. Almoxarife podem ver todos (sem filtro adicional)
 
       const { data, error } = await query;
 
@@ -102,25 +101,15 @@ const Purchases: React.FC = () => {
     setEditingPurchase(null);
   };
 
-  const canCreatePurchase = profile?.role && ['admin', 'gestor', 'operador-administrativo'].includes(profile.role);
+  const canCreatePurchase = profile?.role && ['admin', 'operador-almoxarife'].includes(profile.role);
   const canEditPurchase = (purchase: any) => {
     if (!profile) return false;
     
     // Admins e gestores podem editar qualquer compra
-    if (['admin', 'gestor'].includes(profile.role)) return true;
-    
-    // Operador financeiro pode editar informações financeiras
-    if (profile.role === 'operador-financeiro') return true;
+    if (['admin'].includes(profile.role)) return true;
     
     // Operador almoxarife pode editar status
     if (profile.role === 'operador-almoxarife') return true;
-    
-    // Operador administrativo pode editar apenas suas próprias compras em status inicial
-    if (profile.role === 'operador-administrativo' && 
-        purchase.requester_id === profile.id && 
-        purchase.status === 'pedido-realizado') {
-      return true;
-    }
     
     return false;
   };
@@ -131,16 +120,10 @@ const Purchases: React.FC = () => {
     switch (profile.role) {
       case 'admin':
         return 'Visualizando: Todas as compras do sistema';
-      case 'gestor':
-        return 'Visualizando: Todas as compras da sua unidade';
-      case 'operador-administrativo':
-        return 'Visualizando: Apenas seus pedidos de compra';
       case 'operador-almoxarife':
-        return 'Visualizando: Todas as compras do sistema';
-      case 'operador-financeiro':
-        return 'Visualizando: Todas as compras da sua unidade';
+        return 'Visualizando: Compras do seu CD';
       default:
-        return '';
+        return 'Acesso restrito: Apenas CDs podem fazer compras';
     }
   };
 
@@ -237,6 +220,24 @@ const Purchases: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Alerta sobre nova regra de compras */}
+      {profile?.role && !['admin', 'operador-almoxarife'].includes(profile.role) && (
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+          <div className="flex items-start">
+            <ExclamationTriangleIcon className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-blue-800 mb-2">🛒 Nova Regra de Compras</h3>
+              <div className="text-xs text-blue-700 space-y-1">
+                <p><strong>Apenas Centros de Distribuição podem fazer compras</strong></p>
+                <p>• Unidades fazem <strong>Pedidos Internos</strong> que consomem orçamento</p>
+                <p>• CDs fazem <strong>Compras</strong> para reabastecer estoque</p>
+                <p>• Preços são definidos no estoque do CD</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Compras</h1>

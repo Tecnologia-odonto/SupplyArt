@@ -7,7 +7,8 @@ import {
   BanknotesIcon,
   BuildingOffice2Icon,
   ExclamationTriangleIcon,
-  CalendarIcon
+  CalendarIcon,
+  ChartBarIcon
 } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -16,9 +17,19 @@ import Modal from '../../components/UI/Modal';
 import Badge from '../../components/UI/Badge';
 import { supabase } from '../../lib/supabase';
 import { usePermissions } from '../../hooks/usePermissions';
+import { 
+  getCurrentDateBrazil, 
+  formatDateBrazil, 
+  formatDateForDisplay,
+  getFirstDayOfMonthBrazil,
+  getDaysAgoBrazil,
+  getDaysDifference,
+  getTodayBrazilForInput
+} from '../../utils/dateHelper';
+import toast from 'react-hot-toast';
 import IncomeForm from './IncomeForm';
 import BudgetForm from './BudgetForm';
-import toast from 'react-hot-toast';
+import UnitExpenseReport from './UnitExpenseReport';
 
 interface FinancialTransaction {
   id: string;
@@ -55,19 +66,16 @@ const Financial: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [incomeModalOpen, setIncomeModalOpen] = useState(false);
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
+  const [expenseReportOpen, setExpenseReportOpen] = useState(false);
   const [editingBudget, setEditingBudget] = useState<any>(null);
   
   // Filtros de data
-  const [startDate, setStartDate] = useState(() => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 1); // Último mês por padrão
-    return date.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  const [startDate, setStartDate] = useState(() => getDaysAgoBrazil(30));
+  const [endDate, setEndDate] = useState(() => getTodayBrazilForInput());
   const [budgetPeriodFilter, setBudgetPeriodFilter] = useState(() => {
-    return new Date().toISOString().split('T')[0];
+    const today = getTodayBrazilForInput();
+    console.log('💰 Initial budgetPeriodFilter:', today);
+    return today;
   });
 
   const permissions = usePermissions();
@@ -163,30 +171,38 @@ const Financial: React.FC = () => {
       // Verificar unidades sem orçamento no período selecionado
       allUnits.forEach(unit => {
         if (!unitsWithBudget.has(unit.id)) {
-          alerts.push(`Unidade "${unit.name}" não possui orçamento definido para a data ${new Date(budgetPeriodFilter).toLocaleDateString('pt-BR')}`);
+          alerts.push(`Unidade "${unit.name}" não possui orçamento definido para a data ${formatDateForDisplay(budgetPeriodFilter)}`);
         }
       });
 
       // Verificar orçamentos próximos do vencimento (próximos 7 dias da data selecionada)
-      const selectedDate = new Date(budgetPeriodFilter);
-      const sevenDaysFromSelected = new Date(selectedDate);
-      sevenDaysFromSelected.setDate(sevenDaysFromSelected.getDate() + 7);
-      const sevenDaysFromSelectedStr = sevenDaysFromSelected.toISOString().split('T')[0];
+      const selectedDateBrazil = new Date(budgetPeriodFilter + 'T12:00:00-03:00');
+      
+      // Log para debug do período de orçamento
+      console.log('💰 Budget period analysis:', {
+        budgetPeriodFilter,
+        selectedDateBrazil: selectedDateBrazil.toISOString(),
+        selectedDateBrazilFormatted: selectedDateBrazil.toLocaleDateString('pt-BR'),
+        budgetsCount: sortedBudgets.length
+      });
 
       sortedBudgets.forEach(budget => {
-        const endDate = new Date(budget.period_end);
-        const selectedDateObj = new Date(budgetPeriodFilter);
+        const endDate = new Date(budget.period_end + 'T12:00:00-03:00');
         
-        if (endDate <= sevenDaysFromSelected && endDate >= selectedDateObj) {
-          const daysUntilExpiry = Math.ceil(
-            (endDate.getTime() - selectedDateObj.getTime()) / (1000 * 60 * 60 * 24)
-          );
+        const daysUntilExpiry = getDaysDifference(budgetPeriodFilter, budget.period_end);
+        
+        // Log para debug de cada orçamento
+        console.log(`💰 Budget ${budget.unit?.name}:`, {
+          period_end: budget.period_end,
+          endDate: endDate.toISOString(),
+          daysUntilExpiry,
+          selectedDate: budgetPeriodFilter
+        });
           
-          if (daysUntilExpiry <= 7 && daysUntilExpiry >= 0) {
-            alerts.push(
-              `Orçamento da unidade "${budget.unit?.name}" expira em ${daysUntilExpiry} dia(s) a partir da data selecionada`
-            );
-          }
+        if (endDate >= selectedDateBrazil && daysUntilExpiry <= 7) {
+          alerts.push(
+            `Orçamento da unidade "${budget.unit?.name}" expira em ${daysUntilExpiry} dia(s) a partir da data selecionada`
+          );
         }
       });
 
@@ -203,6 +219,7 @@ const Financial: React.FC = () => {
     fetchFinancialData();
     setIncomeModalOpen(false);
     setBudgetModalOpen(false);
+    setExpenseReportOpen(false);
     setEditingBudget(null);
   };
 
@@ -280,7 +297,7 @@ const Financial: React.FC = () => {
     {
       key: 'created_at',
       title: 'Data',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDateForDisplay(value)
     },
   ];
 
@@ -331,15 +348,12 @@ const Financial: React.FC = () => {
       key: 'period',
       title: 'Período',
       render: (_: any, record: UnitBudget) => {
-        const startDate = new Date(record.period_start);
-        const endDate = new Date(record.period_end);
-        const selectedDate = new Date(budgetPeriodFilter);
-        const daysUntilExpiry = Math.ceil((endDate.getTime() - selectedDate.getTime()) / (1000 * 60 * 60 * 24));
+        const daysUntilExpiry = getDaysDifference(budgetPeriodFilter, record.period_end);
         
         return (
           <div>
             <span className="text-sm text-gray-600">
-              {startDate.toLocaleDateString('pt-BR')} - {endDate.toLocaleDateString('pt-BR')}
+              {formatDateForDisplay(record.period_start)} - {formatDateForDisplay(record.period_end)}
             </span>
             {daysUntilExpiry <= 7 && daysUntilExpiry > 0 && (
               <div className="text-xs text-warning-600 mt-1">
@@ -421,6 +435,14 @@ const Financial: React.FC = () => {
             <BanknotesIcon className="w-4 h-4 mr-2" />
             Gerenciar Orçamentos
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setExpenseReportOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            <ChartBarIcon className="w-4 h-4 mr-2" />
+            Relatório de Gastos
+          </Button>
         </div>
       </div>
 
@@ -480,10 +502,8 @@ const Financial: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
-              const lastMonth = new Date();
-              lastMonth.setMonth(lastMonth.getMonth() - 1);
-              setStartDate(lastMonth.toISOString().split('T')[0]);
+              const today = getTodayBrazilForInput();
+              setStartDate(getDaysAgoBrazil(30));
               setEndDate(today);
               setBudgetPeriodFilter(today);
             }}
@@ -494,10 +514,8 @@ const Financial: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
-              const firstDayOfMonth = new Date();
-              firstDayOfMonth.setDate(1);
-              setStartDate(firstDayOfMonth.toISOString().split('T')[0]);
+              const today = getTodayBrazilForInput();
+              setStartDate(getFirstDayOfMonthBrazil());
               setEndDate(today);
               setBudgetPeriodFilter(today);
             }}
@@ -508,10 +526,10 @@ const Financial: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
-              const firstDayOfYear = new Date();
-              firstDayOfYear.setMonth(0, 1);
-              setStartDate(firstDayOfYear.toISOString().split('T')[0]);
+              const today = getTodayBrazilForInput();
+              const brazilDate = getCurrentDateBrazil();
+              const firstDayOfYear = new Date(brazilDate.getFullYear(), 0, 1);
+              setStartDate(formatDateBrazil(firstDayOfYear));
               setEndDate(today);
               setBudgetPeriodFilter(today);
             }}
@@ -615,7 +633,7 @@ const Financial: React.FC = () => {
         <div className="flex justify-between items-center mb-4">
           <div>
             <h3 className="text-lg font-medium text-gray-900">
-              Orçamentos por Unidade - {new Date(budgetPeriodFilter).toLocaleDateString('pt-BR')}
+              Orçamentos por Unidade - {formatDateForDisplay(new Date(budgetPeriodFilter + 'T12:00:00-03:00'))}
             </h3>
             <p className="text-sm text-gray-500">
               Orçamentos válidos para a data de referência selecionada
@@ -637,7 +655,8 @@ const Financial: React.FC = () => {
           columns={budgetColumns}
           data={budgets}
           loading={loading}
-          emptyMessage={`Nenhum orçamento encontrado para a data ${new Date(budgetPeriodFilter).toLocaleDateString('pt-BR')}`}
+          emptyMessage={`Nenhum orçamento encontrado para a data ${formatDateForDisplay(budgetPeriodFilter)}`}
+          emptyMessage={`Nenhum orçamento encontrado para a data ${formatDateForDisplay(new Date(budgetPeriodFilter + 'T12:00:00-03:00'))}`}
         />
       </Card>
 
@@ -647,7 +666,7 @@ const Financial: React.FC = () => {
           <div>
             <h3 className="text-lg font-medium text-gray-900">Transações Financeiras</h3>
             <p className="text-sm text-gray-500">
-              Período: {new Date(startDate).toLocaleDateString('pt-BR')} até {new Date(endDate).toLocaleDateString('pt-BR')}
+              Período: {formatDateForDisplay(startDate)} até {formatDateForDisplay(endDate)}
             </p>
           </div>
         </div>
@@ -689,6 +708,18 @@ const Financial: React.FC = () => {
             setBudgetModalOpen(false);
             setEditingBudget(null);
           }}
+        />
+      </Modal>
+
+      {/* Modal de Relatório de Gastos */}
+      <Modal
+        isOpen={expenseReportOpen}
+        onClose={() => setExpenseReportOpen(false)}
+        title="Relatório de Gastos por Unidade"
+        size="xl"
+      >
+        <UnitExpenseReport
+          onClose={() => setExpenseReportOpen(false)}
         />
       </Modal>
     </div>

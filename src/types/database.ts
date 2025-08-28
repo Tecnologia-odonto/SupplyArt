@@ -109,6 +109,9 @@ export type Database = {
           min_quantity: number | null;
           max_quantity: number | null;
           location: string | null;
+          unit_price: number;
+          last_price_update: string;
+          price_updated_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -131,6 +134,9 @@ export type Database = {
           min_quantity?: number | null;
           max_quantity?: number | null;
           location?: string | null;
+          unit_price?: number;
+          last_price_update?: string;
+          price_updated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -168,6 +174,9 @@ export type Database = {
           location?: string;
           status?: 'available' | 'reserved' | 'damaged' | 'expired';
           notes?: string | null;
+          unit_price?: number;
+          last_price_update?: string;
+          price_updated_by?: string | null;
           description?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -276,6 +285,9 @@ export type Database = {
           rejection_reason: string | null;
           approved_by: string | null;
           approved_at: string | null;
+          total_estimated_cost: number;
+          budget_consumed: boolean;
+          budget_consumption_date: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -290,6 +302,9 @@ export type Database = {
           rejection_reason?: string | null;
           approved_by?: string | null;
           approved_at?: string | null;
+          total_estimated_cost?: number;
+          budget_consumed?: boolean;
+          budget_consumption_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -304,6 +319,9 @@ export type Database = {
           rejection_reason?: string | null;
           approved_by?: string | null;
           approved_at?: string | null;
+          total_estimated_cost?: number;
+          budget_consumed?: boolean;
+          budget_consumption_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -320,6 +338,8 @@ export type Database = {
           needs_purchase: boolean;
           notes: string | null;
           unit_price: number | null;
+          estimated_unit_price: number;
+          estimated_total_price: number;
           has_error: boolean;
           error_description: string | null;
           created_at: string;
@@ -335,6 +355,8 @@ export type Database = {
           needs_purchase?: boolean;
           notes?: string | null;
           unit_price?: number | null;
+          estimated_unit_price?: number;
+          estimated_total_price?: number;
           has_error?: boolean;
           error_description?: string | null;
           created_at?: string;
@@ -350,6 +372,8 @@ export type Database = {
           needs_purchase?: boolean;
           notes?: string | null;
           unit_price?: number | null;
+          estimated_unit_price?: number;
+          estimated_total_price?: number;
           has_error?: boolean;
           error_description?: string | null;
           created_at?: string;

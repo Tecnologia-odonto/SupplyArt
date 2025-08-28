@@ -14,8 +14,14 @@ import Card from '../../components/UI/Card';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
-import { format, startOfMonth, parseISO } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { 
+  getCurrentDateBrazil, 
+  formatDateBrazil, 
+  formatDateForDisplay,
+  formatDateTimeForDisplay,
+  getFirstDayOfMonthBrazil,
+  getDaysAgoBrazil
+} from '../../utils/dateHelper';
 
 interface DashboardStats {
   totalItems: number;
@@ -73,12 +79,8 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>('');
-  const [startDate, setStartDate] = useState(() => {
-    return format(startOfMonth(new Date()), 'yyyy-MM-dd');
-  });
-  const [endDate, setEndDate] = useState(() => {
-    return format(new Date(), 'yyyy-MM-dd');
-  });
+  const [startDate, setStartDate] = useState(() => getFirstDayOfMonthBrazil());
+  const [endDate, setEndDate] = useState(() => formatDateBrazil(getCurrentDateBrazil()));
   
   const { profile } = useAuth();
   const permissions = usePermissions();
@@ -205,7 +207,7 @@ const Dashboard: React.FC = () => {
       if (expiryError) throw expiryError;
 
       // Fetch maintenance alerts (inventory items with upcoming maintenance)
-      const today = new Date();
+      const today = getCurrentDateBrazil();
       const { data: maintenanceAlertsData, error: maintenanceError } = await supabase
         .from('inventory_events')
         .select(`
@@ -217,8 +219,8 @@ const Dashboard: React.FC = () => {
           )
         `)
         .not('next_action_date', 'is', null)
-        .lte('next_action_date', format(new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'))
-        .gte('next_action_date', format(today, 'yyyy-MM-dd'))
+        .lte('next_action_date', formatDateBrazil(new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)))
+        .gte('next_action_date', formatDateBrazil(today))
         .order('next_action_date', { ascending: true })
         .limit(5);
 
@@ -270,8 +272,7 @@ const Dashboard: React.FC = () => {
 
       // Format maintenance alerts
       const formattedMaintenanceAlerts = filteredMaintenanceAlerts?.map(alert => {
-        const nextDate = new Date(alert.next_action_date);
-        const daysRemaining = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const daysRemaining = getDaysDifference(formatDateBrazil(today), alert.next_action_date);
         
         return {
           id: alert.id,
@@ -354,12 +355,12 @@ const Dashboard: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
+    return formatDateForDisplay(dateString);
   };
 
   const formatDateTime = (dateTimeString: string) => {
-    const date = parseISO(dateTimeString);
-    const now = new Date();
+    const date = new Date(dateTimeString);
+    const now = getCurrentDateBrazil();
     const diffInHours = Math.abs(now.getTime() - date.getTime()) / 36e5;
     
     if (diffInHours < 24) {
@@ -370,7 +371,7 @@ const Dashboard: React.FC = () => {
       return `há ${Math.floor(diffInHours)} ${Math.floor(diffInHours) === 1 ? 'hora' : 'horas'}`;
     }
     
-    return format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+    return formatDateTimeForDisplay(date);
   };
 
   if (loading) {
@@ -471,21 +472,19 @@ const Dashboard: React.FC = () => {
           <button
             className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             onClick={() => {
-              const today = new Date();
-              setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'));
-              setEndDate(format(today, 'yyyy-MM-dd'));
+              const today = formatDateBrazil(getCurrentDateBrazil());
+              setStartDate(getFirstDayOfMonthBrazil());
+              setEndDate(today);
             }}
           >
-            Mês Atual
+            Este Mês
           </button>
           <button
             className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             onClick={() => {
-              const today = new Date();
-              const lastMonth = new Date(today);
-              lastMonth.setMonth(lastMonth.getMonth() - 1);
-              setStartDate(format(startOfMonth(lastMonth), 'yyyy-MM-dd'));
-              setEndDate(format(new Date(today.getFullYear(), today.getMonth(), 0), 'yyyy-MM-dd'));
+              const today = formatDateBrazil(getCurrentDateBrazil());
+              setStartDate(getDaysAgoBrazil(30));
+              setEndDate(today);
             }}
           >
             Mês Anterior
@@ -493,11 +492,21 @@ const Dashboard: React.FC = () => {
           <button
             className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             onClick={() => {
-              const today = new Date();
-              const lastWeek = new Date(today);
-              lastWeek.setDate(lastWeek.getDate() - 7);
-              setStartDate(format(lastWeek, 'yyyy-MM-dd'));
-              setEndDate(format(today, 'yyyy-MM-dd'));
+              const today = formatDateBrazil(getCurrentDateBrazil());
+              const brazilDate = getCurrentDateBrazil();
+              const firstDayOfYear = new Date(brazilDate.getFullYear(), 0, 1);
+              setStartDate(formatDateBrazil(firstDayOfYear));
+              setEndDate(today);
+            }}
+          >
+            Este Ano
+          </button>
+          <button
+            className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            onClick={() => {
+              const today = formatDateBrazil(getCurrentDateBrazil());
+              setStartDate(getDaysAgoBrazil(7));
+              setEndDate(today);
             }}
           >
             Últimos 7 dias
@@ -505,9 +514,9 @@ const Dashboard: React.FC = () => {
           <button
             className="px-3 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             onClick={() => {
-              const today = new Date();
-              setStartDate(format(today, 'yyyy-MM-dd'));
-              setEndDate(format(today, 'yyyy-MM-dd'));
+              const today = formatDateBrazil(getCurrentDateBrazil());
+              setStartDate(today);
+              setEndDate(today);
             }}
           >
             Hoje
