@@ -98,7 +98,8 @@ const Financial: React.FC = () => {
             *,
             unit:units(name, is_cd)
           `)
-          .or(`and(period_start.lte.${budgetPeriodFilter},period_end.gte.${budgetPeriodFilter})`)
+          .lte('period_start', budgetPeriodFilter)
+          .gte('period_end', budgetPeriodFilter)
           .order('created_at', { ascending: false }),
 
         // Buscar todas as unidades para verificar quais não têm orçamento

@@ -6,6 +6,7 @@ import Button from '../../components/UI/Button';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { getPasswordResetUrl } from '../../utils/urlHelper';
 
 interface ProfileFormData {
   name: string;
@@ -226,7 +227,7 @@ const Profile: React.FC = () => {
               onClick={() => {
                 // Enviar email de alteração de senha
                 supabase.auth.resetPasswordForEmail(profile.email, {
-                  redirectTo: `${window.location.origin}/reset-password`
+                  redirectTo: getPasswordResetUrl()
                 });
                 toast.success('Email de alteração de senha enviado!');
               }}

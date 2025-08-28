@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/UI/Button';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
+import { getPasswordResetUrl } from '../../utils/urlHelper';
 
 interface LoginForm {
   email: string;
@@ -89,7 +90,7 @@ const Login: React.FC = () => {
     setResetLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/reset-password`
+        redirectTo: getPasswordResetUrl()
       });
 
       if (error) throw error;
