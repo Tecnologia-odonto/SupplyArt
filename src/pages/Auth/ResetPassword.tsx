@@ -15,6 +15,8 @@ const ResetPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [validatingSession, setValidatingSession] = useState(true);
+  const [sessionValid, setSessionValid] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   
@@ -24,6 +26,8 @@ const ResetPassword: React.FC = () => {
 
   useEffect(() => {
     const validateSession = async () => {
+      setValidatingSession(true);
+      
       // Verificar se há tokens de recuperação de senha na URL
       const accessToken = searchParams.get('access_token');
       const refreshToken = searchParams.get('refresh_token');
@@ -31,32 +35,38 @@ const ResetPassword: React.FC = () => {
 
       if (type === 'recovery' && accessToken && refreshToken) {
         try {
-          // Definir a sessão com os tokens de recuperação
-          const { error: setSessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-
-          if (setSessionError) {
-            throw setSessionError;
-          }
-
-          // Validar se a sessão foi definida corretamente
-          const { data: session, error: getSessionError } = await supabase.auth.getSession();
+          // Apenas validar os tokens sem fazer login automático
+          // Verificar se os tokens são válidos fazendo uma chamada de teste
+          const tempClient = supabase.auth.admin || supabase.auth;
           
-          if (getSessionError || !session?.session) {
-            throw new Error('Sessão inválida ou expirada');
+          // Tentar usar os tokens para verificar se são válidos
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/user`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error('Tokens inválidos ou expirados');
           }
+          
+          // Tokens são válidos, permitir redefinição
+          setSessionValid(true);
         } catch (error) {
           console.error('Session validation error:', error);
           toast.error('Link de recuperação inválido ou expirado');
           navigate('/login');
+          return;
         }
       } else {
         // Se não há tokens válidos, redirecionar para login
         toast.error('Link de recuperação inválido ou expirado');
         navigate('/login');
+        return;
       }
+      
+      setValidatingSession(false);
     };
 
     validateSession();
@@ -70,26 +80,79 @@ const ResetPassword: React.FC = () => {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({
+      // Obter tokens da URL
+      const accessToken = searchParams.get('access_token');
+      const refreshToken = searchParams.get('refresh_token');
+      
+      if (!accessToken || !refreshToken) {
+        throw new Error('Tokens de recuperação não encontrados');
+      }
+      
+      // Criar uma sessão temporária apenas para redefinir a senha
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
+      
+      if (sessionError) {
+        throw new Error('Não foi possível validar os tokens de recuperação');
+      }
+      
+      // Aguardar um pouco para garantir que a sessão foi estabelecida
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Atualizar a senha
+      const { error: updateError } = await supabase.auth.updateUser({
         password: data.password
       });
 
-      if (error) throw error;
+      if (updateError) {
+        throw updateError;
+      }
 
       toast.success('Senha alterada com sucesso! Você será redirecionado para o login.');
       
-      // Fazer logout e redirecionar para login
+      // Fazer logout completo e redirecionar para login
       await supabase.auth.signOut();
+      
+      // Limpar qualquer estado de autenticação
+      localStorage.clear();
+      sessionStorage.clear();
+      
       setTimeout(() => {
         navigate('/login');
       }, 2000);
     } catch (error: any) {
       console.error('Password reset error:', error);
-      toast.error(error.message || 'Erro ao alterar senha');
+      
+      if (error.message?.includes('session_not_found') || 
+          error.message?.includes('invalid_token')) {
+        toast.error('Link de recuperação expirado. Solicite um novo link.');
+        navigate('/login');
+      } else {
+        toast.error(error.message || 'Erro ao alterar senha');
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  // Mostrar loading enquanto valida a sessão
+  if (validatingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-accent-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 text-sm text-gray-600">Validando link de recuperação...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Se a sessão não é válida, não renderizar o formulário
+  if (!sessionValid) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-accent-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -104,6 +167,11 @@ const ResetPassword: React.FC = () => {
           <p className="mt-2 text-center text-sm text-gray-600">
             Digite sua nova senha
           </p>
+          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
+            <p className="text-xs text-blue-700 text-center">
+              🔒 Link de recuperação válido. Defina sua nova senha abaixo.
+            </p>
+          </div>
         </div>
         
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
