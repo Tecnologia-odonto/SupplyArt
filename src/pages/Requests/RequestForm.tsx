@@ -68,7 +68,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   const watchedRequestingUnitId = watch('requesting_unit_id');
   const isNewRequest = !request;
   const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
-  const canEditItems = !request || ['solicitado', 'analisando', 'aprovado', 'aprovado-pendente'].includes(request.status || '');
+  const canEditItems = !request || ['solicitado', 'analisando'].includes(request.status || '');
+  const canChangeStatus = canEditStatus && request && !['aprovado-unidade', 'cancelado'].includes(request.status || '');
+  const needsApproval = request && ['solicitado', 'analisando'].includes(request.status);
 
   useEffect(() => {
     fetchData();
@@ -363,6 +365,34 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   const processRequestSending = async (requestId: string, cdUnitId: string, requestingUnitId: string) => {
     try {
+      console.log('🚚 Starting processRequestSending for request:', requestId);
+      
+      // Verificar se já existem registros em_rota para este pedido
+      const { data: existingEmRota, error: checkError } = await supabase
+        .from('em_rota')
+        .select('id')
+        .eq('request_id', requestId);
+
+      if (checkError) throw checkError;
+
+      if (existingEmRota && existingEmRota.length > 0) {
+        console.log('🚚 Request already has em_rota records, skipping processing');
+        toast.info('Este pedido já foi enviado anteriormente');
+        return;
+      }
+
+      // Buscar dados do pedido para preservar o custo total
+      const { data: requestData, error: requestFetchError } = await supabase
+        .from('requests')
+        .select('total_estimated_cost')
+        .eq('id', requestId)
+        .single();
+
+      if (requestFetchError) throw requestFetchError;
+      
+      const originalTotalCost = requestData.total_estimated_cost || 0;
+      console.log('💰 Preserving original total cost:', originalTotalCost);
+
       // Buscar itens do pedido
       const { data: requestItems, error: itemsError } = await supabase
         .from('request_items')
@@ -376,9 +406,16 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         return;
       }
 
+      console.log('🚚 Processing', requestItems.length, 'items for sending');
+
       // Para cada item, criar registro em em_rota e atualizar estoques
       for (const item of requestItems) {
         const quantityToSend = item.quantity_approved || item.quantity_requested;
+        
+        console.log('🚚 Processing item:', {
+          item_id: item.item_id,
+          quantity_to_send: quantityToSend
+        });
 
         // Verificar estoque no CD
         const { data: cdStock, error: stockError } = await supabase
@@ -391,8 +428,14 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         if (stockError) throw stockError;
 
         const availableStock = cdStock?.quantity || 0;
+        console.log('🚚 CD Stock check:', {
+          available: availableStock,
+          needed: quantityToSend
+        });
+        
         if (quantityToSend > availableStock) {
-          toast.error(`Estoque insuficiente para ${item.item.name}: disponível ${availableStock}, necessário ${quantityToSend}`);
+          console.error('🚚 Insufficient stock for item:', item.item_id);
+          toast.error(`Estoque insuficiente: disponível ${availableStock}, necessário ${quantityToSend}`);
           continue;
         }
 
@@ -410,6 +453,8 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           });
 
         if (emRotaError) throw emRotaError;
+        
+        console.log('🚚 Created em_rota record for item:', item.item_id);
 
         // Subtrair do estoque do CD
         const { error: updateStockError } = await supabase
@@ -421,6 +466,8 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .eq('cd_unit_id', cdUnitId);
 
         if (updateStockError) throw updateStockError;
+        
+        console.log('🚚 Updated CD stock for item:', item.item_id);
 
         // Atualizar quantity_sent no request_item
         const { error: updateItemError } = await supabase
@@ -431,8 +478,26 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .eq('id', item.id);
 
         if (updateItemError) throw updateItemError;
+        
+        console.log('🚚 Updated request_item quantity_sent for:', item.id);
       }
 
+      // IMPORTANTE: Preservar o custo total original do pedido
+      const { error: preserveCostError } = await supabase
+        .from('requests')
+        .update({
+          total_estimated_cost: originalTotalCost
+        })
+        .eq('id', requestId);
+
+      if (preserveCostError) {
+        console.error('Error preserving total cost:', preserveCostError);
+        // Não falhar o processo por causa disso, apenas logar
+      } else {
+        console.log('💰 Successfully preserved total cost:', originalTotalCost);
+      }
+
+      console.log('🚚 Request sending completed successfully');
       toast.success('🚚 Pedido enviado! Itens adicionados à rota de entrega.');
     } catch (error) {
       console.error('Error processing request sending:', error);
@@ -540,26 +605,25 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
 
     // Validar se há pelo menos um item
-  const getTotalEstimatedCost = () => {
-    return requestItems.reduce((total, item) => total + (item.estimated_total_price || 0), 0);
-  };
-
     const validItems = requestItems.filter(item => item.item_id && item.quantity_requested > 0);
-    // Verificar orçamento antes de criar o pedido
-    if (!unitBudget) {
-      toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
-      return;
-    }
-
-    const totalCost = getTotalEstimatedCost();
-    if (totalCost > unitBudget.available_amount) {
-      toast.error(`Orçamento insuficiente. Custo estimado: R$ ${totalCost.toFixed(2)}, Disponível: R$ ${unitBudget.available_amount.toFixed(2)}`);
-      return;
-    }
 
     if (validItems.length === 0 && isNewRequest) {
       toast.error('Adicione pelo menos um item ao pedido');
       return;
+    }
+
+    // Verificar orçamento antes de criar o pedido
+    if (isNewRequest) {
+      if (!unitBudget) {
+        toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
+        return;
+      }
+
+      const totalCost = getTotalEstimatedCost();
+      if (totalCost > unitBudget.available_amount) {
+        toast.error(`Orçamento insuficiente. Custo estimado: R$ ${totalCost.toFixed(2)}, Disponível: R$ ${unitBudget.available_amount.toFixed(2)}`);
+        return;
+      }
     }
 
     // Se estiver tentando mudar para "enviado", verificar estoque
@@ -567,13 +631,6 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       const hasStock = await checkStockAvailability(data.status);
       if (!hasStock) {
         return; // Modal será exibido, aguardar ação do usuário
-      }
-
-      // Se conseguiu passar na verificação de estoque (sem itens em falta),
-      // verificar se há pedidos de compra relacionados que devem ser excluídos
-      if (request?.id) {
-        // Processar envio do pedido (criar registros em_rota)
-        await processRequestSending(request.id, data.cd_unit_id, data.requesting_unit_id);
       }
     }
 
@@ -668,14 +725,24 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
           .insert(itemsToInsert);
 
         if (itemsError) throw itemsError;
+
+        // Recalcular e atualizar o total estimado do pedido
+        const newTotalCost = itemsToInsert.reduce((sum, item) => sum + item.estimated_total_price, 0);
+        
+        const { error: updateTotalError } = await supabase
+          .from('requests')
+          .update({ total_estimated_cost: newTotalCost })
+          .eq('id', requestId);
+
+        if (updateTotalError) throw updateTotalError;
+        
+        console.log('Updated request total cost:', newTotalCost);
       }
 
       // Processar envio do pedido (criar registros em_rota)
       if (data.status === 'enviado' && request?.status !== 'enviado') {
-        // Já foi processado acima se passou na verificação de estoque
-        if (!request) {
-          await processRequestSending(requestId, data.cd_unit_id, data.requesting_unit_id);
-        }
+        console.log('🚚 Processing request sending for status change to "enviado"');
+        await processRequestSending(requestId, data.cd_unit_id, data.requesting_unit_id);
       }
 
       toast.success(request ? 'Pedido atualizado com sucesso!' : 'Pedido criado com sucesso!');
@@ -828,50 +895,113 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div>
-              <label htmlFor="priority" className="block text-sm font-medium text-gray-700 mb-1">
-                Prioridade *
-              </label>
-              <select
-                id="priority"
-                className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                  errors.priority ? 'border-error-300' : ''
-                }`}
-                {...register('priority', { required: 'Prioridade é obrigatória' })}
-              >
-                <option value="baixa">Baixa</option>
-                <option value="normal">Normal</option>
-                <option value="alta">Alta</option>
-                <option value="urgente">Urgente</option>
-              </select>
-              {errors.priority && (
-                <p className="mt-1 text-sm text-error-600">{errors.priority.message}</p>
-              )}
-            </div>
+          {canEditStatus && canChangeStatus && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <div>
+                <label htmlFor="priority" className="block text-sm font-medium text-gray-700 mb-1">
+                  Prioridade *
+                </label>
+                <select
+                  id="priority"
+                  className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                    errors.priority ? 'border-error-300' : ''
+                  }`}
+                  {...register('priority', { required: 'Prioridade é obrigatória' })}
+                >
+                  <option value="baixa">Baixa</option>
+                  <option value="normal">Normal</option>
+                  <option value="alta">Alta</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+                {errors.priority && (
+                  <p className="mt-1 text-sm text-error-600">{errors.priority.message}</p>
+                )}
+              </div>
 
-            {canEditStatus && (
               <div>
                 <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
                   Status *
                 </label>
                 <select
                   id="status"
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
+                  disabled={needsApproval}
+                  className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                    needsApproval ? 'bg-gray-100' : ''
+                  }`}
                   {...register('status')}
                 >
-                  {statusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {statusOptions
+                    .filter(option => {
+                      // Se precisa aprovação, mostrar apenas status atual
+                      if (needsApproval) {
+                        return option.value === request?.status;
+                      }
+                      // Se já foi aprovado/rejeitado, permitir apenas status posteriores
+                      if (request?.status === 'aprovado') {
+                        return ['aprovado', 'preparando', 'enviado', 'erro-pedido'].includes(option.value);
+                      }
+                      if (request?.status === 'rejeitado') {
+                        return ['rejeitado'].includes(option.value);
+                      }
+                      return true;
+                    })
+                    .map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
-                  {statusOptions.find(opt => opt.value === watchedStatus)?.description}
+                  {needsApproval 
+                    ? 'Pedido precisa ser aprovado/rejeitado antes de alterar status'
+                    : statusOptions.find(opt => opt.value === watchedStatus)?.description
+                  }
                 </p>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {!canEditStatus && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <div>
+                <label htmlFor="priority" className="block text-sm font-medium text-gray-700 mb-1">
+                  Prioridade *
+                </label>
+                <select
+                  id="priority"
+                  className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
+                    errors.priority ? 'border-error-300' : ''
+                  }`}
+                  {...register('priority', { required: 'Prioridade é obrigatória' })}
+                >
+                  <option value="baixa">Baixa</option>
+                  <option value="normal">Normal</option>
+                  <option value="alta">Alta</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+                {errors.priority && (
+                  <p className="mt-1 text-sm text-error-600">{errors.priority.message}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Alerta para pedidos que precisam aprovação */}
+          {needsApproval && (
+            <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-md p-4">
+              <div className="flex items-start">
+                <div>
+                  <span className="text-yellow-600 text-xl">⏳</span>
+                </div>
+                <div className="ml-3">
+                  <h4 className="text-sm font-medium text-yellow-800">Aguardando Aprovação</h4>
+                  <p className="text-sm text-yellow-700 mt-1">
+                    Este pedido precisa ser aprovado ou rejeitado por um Gestor ou Operador Almoxarife antes que o status possa ser alterado.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4">
             <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">

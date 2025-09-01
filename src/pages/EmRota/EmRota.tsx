@@ -287,71 +287,17 @@ const EmRota: React.FC = () => {
 
               if (requestFetchError) throw requestFetchError;
 
-              // Consumir orçamento apenas se ainda não foi consumido
-              if (!requestData.budget_consumed && requestData.total_estimated_cost > 0) {
-                const { error: budgetError } = await supabase
-                  .from('unit_budgets')
-                  .update({
-                    used_amount: supabase.raw(`used_amount + ${requestData.total_estimated_cost}`)
-                  })
-                  .eq('unit_id', requestData.requesting_unit_id)
-                  .lte('period_start', new Date().toISOString().split('T')[0])
-                  .gte('period_end', new Date().toISOString().split('T')[0]);
-
-                if (budgetError) {
-                  console.error('Error updating budget:', budgetError);
-                  toast.error('Erro ao atualizar orçamento da unidade');
-                }
-
-                // Criar transação financeira
-                const { error: transactionError } = await supabase
-                  .from('financial_transactions')
-                  .insert({
-                    type: 'expense',
-                    amount: requestData.total_estimated_cost,
-                    description: `Consumo de orçamento - Pedido #${requestId.slice(0, 8)}`,
-                    unit_id: requestData.requesting_unit_id,
-                    reference_type: 'request',
-                    reference_id: requestId,
-                    created_by: profile?.id || '00000000-0000-0000-0000-000000000000'
-                  });
-
-                if (transactionError) {
-                  console.error('Error creating financial transaction:', transactionError);
-                }
-              }
-
-              // Marcar pedido como recebido e orçamento consumido
+              // Marcar pedido como recebido (SEM CONSUMIR ORÇAMENTO AINDA)
               const { error: requestReceivedError } = await supabase
                 .from('requests')
                 .update({ 
-                  status: 'recebido',
-                  budget_consumed: true,
-                  budget_consumption_date: new Date().toISOString()
+                  status: 'recebido'
                 })
                 .eq('id', requestId);
 
               if (requestReceivedError) throw requestReceivedError;
 
-              // Aguardar um momento e então finalizar o pedido
-              setTimeout(async () => {
-                try {
-                  const { error: requestFinalizedError } = await supabase
-                    .from('requests')
-                    .update({ status: 'aprovado-unidade' })
-                    .eq('id', requestId);
-
-                  if (requestFinalizedError) {
-                    console.error('Error finalizing request:', requestFinalizedError);
-                  } else {
-                    toast.success('🎉 Pedido finalizado automaticamente! Todos os itens foram entregues e confirmados.');
-                  }
-                } catch (finalizeError) {
-                  console.error('Error in request finalization:', finalizeError);
-                }
-              }, 1000);
-              
-              toast.success('🎉 Todos os itens do pedido foram entregues! Pedido sendo finalizado...');
+              toast.success('🎉 Todos os itens do pedido foram entregues! Aguardando confirmação final da unidade.');
             }
           }
         }

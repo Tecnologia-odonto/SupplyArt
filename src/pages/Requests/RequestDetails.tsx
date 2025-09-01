@@ -5,6 +5,7 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { CheckIcon, XMarkIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
+import { createAuditLog } from '../../utils/auditLogger';
 import toast from 'react-hot-toast';
 
 interface RequestDetailsProps {
@@ -200,6 +201,11 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
 
   const canApproveReject = onApprove && onReject && ['solicitado', 'analisando'].includes(request.status);
   const canCreatePurchase = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
+  const canFinalize = request.status === 'recebido' && profile && (
+    profile.role === 'admin' || 
+    profile.role === 'gestor' ||
+    (profile.role === 'operador-administrativo' && profile.unit_id === request.requesting_unit_id)
+  );
 
   return (
     <div className="space-y-6">
@@ -213,7 +219,35 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
               <p className="text-sm text-green-700 mt-1">
                 Aprovado por {request.approved_by_profile?.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
               </p>
+              <p className="text-sm text-green-700 mt-1">
+                💰 Orçamento será consumido quando a unidade confirmar o recebimento
+              </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {request.status === 'recebido' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <CheckIcon className="h-5 w-5 text-blue-600 mr-2" />
+              <div>
+                <h4 className="text-sm font-medium text-blue-800">Itens Recebidos</h4>
+                <p className="text-sm text-blue-700 mt-1">
+                  Todos os itens foram entregues. Confirme o recebimento para consumir o orçamento.
+                </p>
+              </div>
+            </div>
+            {canFinalize && (
+              <Button
+                size="sm"
+                onClick={handleFinalizeRequest}
+                className="ml-4"
+              >
+                ✅ Confirmar Recebimento
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -240,9 +274,11 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
             <XMarkIcon className="h-5 w-5 text-red-600 mr-2" />
             <div>
               <h4 className="text-sm font-medium text-red-800">Pedido Rejeitado</h4>
-              <p className="text-sm text-red-700 mt-1">
-                Rejeitado por {request.approved_by_profile?.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
-              </p>
+              {request.approved_by_profile && request.approved_at && (
+                <p className="text-sm text-red-700 mt-1">
+                  Rejeitado por {request.approved_by_profile.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
+                </p>
+              )}
               {request.rejection_reason && (
                 <p className="text-sm text-red-700 mt-1">
                   <strong>Motivo:</strong> {request.rejection_reason}
@@ -295,8 +331,11 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
             <p className="mt-1 text-lg font-semibold text-primary-600">
               R$ {(request.total_estimated_cost || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </p>
-            {request.budget_consumed && (
+            {request.status === 'aprovado-unidade' && request.budget_consumed && (
               <p className="text-xs text-green-600 mt-1">✅ Orçamento já consumido</p>
+            )}
+            {['aprovado', 'preparando', 'enviado', 'recebido'].includes(request.status) && (
+              <p className="text-xs text-blue-600 mt-1">💰 Orçamento será consumido na confirmação final</p>
             )}
           </div>
           <div>
