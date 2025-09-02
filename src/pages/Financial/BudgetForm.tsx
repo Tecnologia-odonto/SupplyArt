@@ -109,7 +109,7 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
     defaultValues: {
       unit_id: budget?.unit_id || '',
       budget_amount: budget?.budget_amount || 0,
-      period_start: budget?.period_start || getTodayBrazilForInput(),
+      period_start: budget?.period_start || new Date().toISOString().split('T')[0],
       period_end: budget?.period_end || (() => {
         const today = new Date();
         const nextYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());

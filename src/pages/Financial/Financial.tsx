@@ -353,7 +353,7 @@ const Financial: React.FC = () => {
         return (
           <div>
             <span className="text-sm text-gray-600">
-              {formatDateForDisplay(record.period_start)} - {formatDateForDisplay(record.period_end)}
+              {new Date(record.period_start + 'T12:00:00').toLocaleDateString('pt-BR')} - {new Date(record.period_end + 'T12:00:00').toLocaleDateString('pt-BR')}
             </span>
             {daysUntilExpiry <= 7 && daysUntilExpiry > 0 && (
               <div className="text-xs text-warning-600 mt-1">
@@ -633,7 +633,7 @@ const Financial: React.FC = () => {
         <div className="flex justify-between items-center mb-4">
           <div>
             <h3 className="text-lg font-medium text-gray-900">
-              Orçamentos por Unidade - {formatDateForDisplay(new Date(budgetPeriodFilter + 'T12:00:00-03:00'))}
+              Orçamentos por Unidade - {new Date(budgetPeriodFilter + 'T12:00:00').toLocaleDateString('pt-BR')}
             </h3>
             <p className="text-sm text-gray-500">
               Orçamentos válidos para a data de referência selecionada
@@ -656,7 +656,7 @@ const Financial: React.FC = () => {
           data={budgets}
           loading={loading}
           emptyMessage={`Nenhum orçamento encontrado para a data ${formatDateForDisplay(budgetPeriodFilter)}`}
-          emptyMessage={`Nenhum orçamento encontrado para a data ${formatDateForDisplay(new Date(budgetPeriodFilter + 'T12:00:00-03:00'))}`}
+          emptyMessage={`Nenhum orçamento encontrado para a data ${new Date(budgetPeriodFilter + 'T12:00:00').toLocaleDateString('pt-BR')}`}
         />
       </Card>
 
