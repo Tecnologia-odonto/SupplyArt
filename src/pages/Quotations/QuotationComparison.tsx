@@ -151,6 +151,14 @@ const QuotationComparison: React.FC<QuotationComparisonProps> = ({ quotation, on
 
           if (updatePurchaseError) throw updatePurchaseError;
 
+          console.log('💰 Updated purchase item prices:', {
+            item_id: itemData.item.id,
+            unit_price: selectedResponse.unit_price,
+            total_price: selectedResponse.unit_price * itemData.quantity,
+            supplier_id: selectedResponse.supplier_id,
+            new_total_value: newTotalValue
+          });
+
           // Adicionar ao histórico de preços
           const { error: priceHistoryError } = await supabase
             .from('price_history')

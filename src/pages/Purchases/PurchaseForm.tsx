@@ -95,16 +95,36 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       // Recarregar dados da compra para pegar preços atualizados das cotações
       const reloadPurchaseData = async () => {
         try {
-          const { data: updatedPurchase, error } = await supabase
+          const { data: updatedPurchase, error: purchaseError } = await supabase
             .from('purchases')
             .select('total_value')
             .eq('id', purchase.id)
             .single();
 
-          if (error) throw error;
+          if (purchaseError) throw purchaseError;
           
           if (updatedPurchase?.total_value !== purchase.total_value) {
             setValue('total_value', updatedPurchase.total_value || 0);
+          }
+
+          // Recarregar itens da compra para pegar preços atualizados
+          const { data: updatedItems, error: itemsError } = await supabase
+            .from('purchase_items')
+            .select('*')
+            .eq('purchase_id', purchase.id);
+
+          if (itemsError) throw itemsError;
+
+          if (updatedItems && updatedItems.length > 0) {
+            const updatedPurchaseItems = updatedItems.map(item => ({
+              item_id: item.item_id,
+              quantity: item.quantity,
+              unit_price: item.unit_price || undefined,
+              supplier_id: item.supplier_id || undefined
+            }));
+            
+            setPurchaseItems(updatedPurchaseItems);
+            console.log('🔄 Reloaded purchase items with updated prices:', updatedPurchaseItems);
           }
         } catch (error) {
           console.error('Error reloading purchase data:', error);
@@ -839,16 +859,17 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                           value={purchaseItem.unit_price || ''}
                           onChange={(e) => updateItem(index, 'unit_price', e.target.value ? Number(e.target.value) : undefined)}
                           disabled={isFinalized}
-                          placeholder="Será preenchido pela cotação"
+                          placeholder="0.00"
                           className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
                             isFinalized ? 'bg-gray-100' : ''
                           }`}
                         />
-                        {!purchaseItem.unit_price && (
-                          <p className="mt-1 text-xs text-blue-600">
-                            💡 Preço será preenchido automaticamente ao selecionar cotação
-                          </p>
-                        )}
+                        <p className="mt-1 text-xs text-gray-500">
+                          {purchaseItem.unit_price ? 
+                            '✅ Preço definido' : 
+                            '💡 Será preenchido pela cotação ou digite manualmente'
+                          }
+                        </p>
                       </div>
 
                       <div className="w-32">
