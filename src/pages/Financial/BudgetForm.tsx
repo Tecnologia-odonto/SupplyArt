@@ -104,6 +104,7 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [budgetAmount, setBudgetAmount] = useState(budget?.budget_amount || 0);
+  const [validating, setValidating] = useState(false);
 
   const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
@@ -143,7 +144,63 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
     }
   };
 
+  const validatePeriodOverlap = async (unitId: string, startDate: string, endDate: string) => {
+    try {
+      setValidating(true);
+      
+      // Buscar orçamentos existentes para esta unidade que se sobrepõem ao período
+      const { data: existingBudgets, error } = await supabase
+        .from('unit_budgets')
+        .select('id, period_start, period_end, budget_amount')
+        .eq('unit_id', unitId)
+        .or(`and(period_start.lte.${endDate},period_end.gte.${startDate})`);
+
+      if (error) throw error;
+
+      // Se estiver editando, ignorar o próprio orçamento
+      const overlappingBudgets = existingBudgets?.filter(existingBudget => {
+        if (budget && existingBudget.id === budget.id) {
+          return false; // Ignorar o próprio orçamento na edição
+        }
+        return true;
+      }) || [];
+
+      if (overlappingBudgets.length > 0) {
+        const overlappingBudget = overlappingBudgets[0];
+        const overlappingStart = new Date(overlappingBudget.period_start + 'T12:00:00').toLocaleDateString('pt-BR');
+        const overlappingEnd = new Date(overlappingBudget.period_end + 'T12:00:00').toLocaleDateString('pt-BR');
+        const overlappingAmount = overlappingBudget.budget_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        
+        toast.error(
+          `❌ Já existe um orçamento para esta unidade no período de ${overlappingStart} até ${overlappingEnd} (R$ ${overlappingAmount}). ` +
+          `Não é possível criar orçamentos com períodos sobrepostos.`
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error validating period overlap:', error);
+      toast.error('Erro ao validar período do orçamento');
+      return false;
+    } finally {
+      setValidating(false);
+    }
+  };
+
   const onSubmit = async (data: FormData) => {
+    // Validar se as datas são válidas
+    if (new Date(data.period_start) >= new Date(data.period_end)) {
+      toast.error('A data de início deve ser anterior à data de fim');
+      return;
+    }
+
+    // Validar sobreposição de períodos
+    const isValidPeriod = await validatePeriodOverlap(data.unit_id, data.period_start, data.period_end);
+    if (!isValidPeriod) {
+      return; // Erro já foi mostrado na validação
+    }
+
     try {
       const budgetData = {
         unit_id: data.unit_id,
@@ -287,10 +344,10 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
           </Button>
           <Button 
             type="submit" 
-            loading={isSubmitting}
+            loading={isSubmitting || validating}
             disabled={budgetAmount <= 0}
           >
-            {budget ? 'Atualizar' : 'Criar'} Orçamento
+            {validating ? 'Validando...' : budget ? 'Atualizar' : 'Criar'} Orçamento
           </Button>
         </div>
       </form>
