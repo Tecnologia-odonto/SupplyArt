@@ -106,6 +106,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async (userId: string) => {
     try {
+      // Verificar se as variáveis de ambiente estão configuradas
+      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+        console.error('Supabase environment variables not configured');
+        toast.error('Configuração do Supabase não encontrada. Verifique as variáveis de ambiente.');
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -116,6 +124,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(data);
     } catch (error) {
       console.error('Error fetching profile:', error);
+      
+      // Verificar se é erro de rede
+      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        toast.error('Erro de conexão. Verifique sua internet e configuração do Supabase.');
+      } else {
+        toast.error('Erro ao carregar perfil do usuário');
+      }
     } finally {
       setLoading(false);
     }

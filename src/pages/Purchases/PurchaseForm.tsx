@@ -44,6 +44,11 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
   const [loading, setLoading] = useState(true);
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemForm[]>([{ item_id: '', quantity: 1 }]);
   const [isFinalizingPurchase, setIsFinalizingPurchase] = useState(false);
+  const [quotationStatus, setQuotationStatus] = useState<{
+    hasQuotations: boolean;
+    allItemsQuoted: boolean;
+    quotationDetails: any[];
+  }>({ hasQuotations: false, allItemsQuoted: false, quotationDetails: [] });
   const { profile } = useAuth();
 
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -83,6 +88,32 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       calculateTotal();
     }
   }, [purchaseItems, canEditFinancialInfo]);
+
+  // Buscar dados atualizados quando o formulário abrir
+  useEffect(() => {
+    if (purchase) {
+      // Recarregar dados da compra para pegar preços atualizados das cotações
+      const reloadPurchaseData = async () => {
+        try {
+          const { data: updatedPurchase, error } = await supabase
+            .from('purchases')
+            .select('total_value')
+            .eq('id', purchase.id)
+            .single();
+
+          if (error) throw error;
+          
+          if (updatedPurchase?.total_value !== purchase.total_value) {
+            setValue('total_value', updatedPurchase.total_value || 0);
+          }
+        } catch (error) {
+          console.error('Error reloading purchase data:', error);
+        }
+      };
+
+      reloadPurchaseData();
+    }
+  }, [purchase, setValue]);
 
   useEffect(() => {
     fetchData();
@@ -808,10 +839,16 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                           value={purchaseItem.unit_price || ''}
                           onChange={(e) => updateItem(index, 'unit_price', e.target.value ? Number(e.target.value) : undefined)}
                           disabled={isFinalized}
+                          placeholder="Será preenchido pela cotação"
                           className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
                             isFinalized ? 'bg-gray-100' : ''
                           }`}
                         />
+                        {!purchaseItem.unit_price && (
+                          <p className="mt-1 text-xs text-blue-600">
+                            💡 Preço será preenchido automaticamente ao selecionar cotação
+                          </p>
+                        )}
                       </div>
 
                       <div className="w-32">

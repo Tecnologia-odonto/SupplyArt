@@ -19,6 +19,8 @@ interface PurchaseWithDetails {
   notes: string | null;
   created_at: string;
   requester_id: string;
+  quotation_complete?: boolean | null;
+  quotations_count?: number;
   unit: {
     name: string;
   };

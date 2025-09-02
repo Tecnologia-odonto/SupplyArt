@@ -649,6 +649,135 @@ export type Database = {
         };
       };
     };
+    quotations: {
+      Row: {
+        id: string;
+        purchase_id: string;
+        title: string;
+        description: string | null;
+        status: 'rascunho' | 'enviada' | 'em_analise' | 'finalizada' | 'cancelada';
+        deadline: string | null;
+        created_by: string;
+        created_at: string;
+        updated_at: string;
+      };
+      Insert: {
+        id?: string;
+        purchase_id: string;
+        title: string;
+        description?: string | null;
+        status?: 'rascunho' | 'enviada' | 'em_analise' | 'finalizada' | 'cancelada';
+        deadline?: string | null;
+        created_by: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+      Update: {
+        id?: string;
+        purchase_id?: string;
+        title?: string;
+        description?: string | null;
+        status?: 'rascunho' | 'enviada' | 'em_analise' | 'finalizada' | 'cancelada';
+        deadline?: string | null;
+        created_by?: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+    };
+    quotation_items: {
+      Row: {
+        id: string;
+        quotation_id: string;
+        item_id: string;
+        quantity: number;
+        created_at: string;
+      };
+      Insert: {
+        id?: string;
+        quotation_id: string;
+        item_id: string;
+        quantity: number;
+        created_at?: string;
+      };
+      Update: {
+        id?: string;
+        quotation_id?: string;
+        item_id?: string;
+        quantity?: number;
+        created_at?: string;
+      };
+    };
+    quotation_responses: {
+      Row: {
+        id: string;
+        quotation_id: string;
+        supplier_id: string;
+        item_id: string;
+        unit_price: number;
+        total_price: number;
+        delivery_time: number | null;
+        notes: string | null;
+        is_selected: boolean;
+        created_at: string;
+        updated_at: string;
+      };
+      Insert: {
+        id?: string;
+        quotation_id: string;
+        supplier_id: string;
+        item_id: string;
+        unit_price: number;
+        delivery_time?: number | null;
+        notes?: string | null;
+        is_selected?: boolean;
+        created_at?: string;
+        updated_at?: string;
+      };
+      Update: {
+        id?: string;
+        quotation_id?: string;
+        supplier_id?: string;
+        item_id?: string;
+        unit_price?: number;
+        delivery_time?: number | null;
+        notes?: string | null;
+        is_selected?: boolean;
+        created_at?: string;
+        updated_at?: string;
+      };
+    };
+    price_history: {
+      Row: {
+        id: string;
+        item_id: string;
+        supplier_id: string;
+        unit_price: number;
+        purchase_id: string | null;
+        quotation_id: string | null;
+        purchase_date: string;
+        created_at: string;
+      };
+      Insert: {
+        id?: string;
+        item_id: string;
+        supplier_id: string;
+        unit_price: number;
+        purchase_id?: string | null;
+        quotation_id?: string | null;
+        purchase_date?: string;
+        created_at?: string;
+      };
+      Update: {
+        id?: string;
+        item_id?: string;
+        supplier_id?: string;
+        unit_price?: number;
+        purchase_id?: string | null;
+        quotation_id?: string | null;
+        purchase_date?: string;
+        created_at?: string;
+      };
+    };
     Views: {
       [_ in never]: never;
     };
@@ -678,6 +807,10 @@ export type AuditLog = Database['public']['Tables']['audit_logs']['Row'];
 export type FinancialTransaction = Database['public']['Tables']['financial_transactions']['Row'];
 export type UnitBudget = Database['public']['Tables']['unit_budgets']['Row'];
 export type Location = Database['public']['Tables']['locations']['Row'];
+export type Quotation = Database['public']['Tables']['quotations']['Row'];
+export type QuotationItem = Database['public']['Tables']['quotation_items']['Row'];
+export type QuotationResponse = Database['public']['Tables']['quotation_responses']['Row'];
+export type PriceHistory = Database['public']['Tables']['price_history']['Row'];
 
 export type UserRole = 'admin' | 'gestor' | 'operador-financeiro' | 'operador-administrativo' | 'operador-almoxarife';
 export type PurchaseStatus = 'pedido-realizado' | 'em-cotacao' | 'comprado-aguardando' | 'chegou-cd' | 'enviado' | 'erro-pedido' | 'finalizado';
@@ -688,3 +821,4 @@ export type MovementType = 'transfer' | 'adjustment' | 'purchase';
 export type TransactionType = 'income' | 'expense';
 export type RequestStatus = 'solicitado' | 'analisando' | 'aprovado' | 'aprovado-pendente' | 'rejeitado' | 'preparando' | 'enviado' | 'recebido' | 'aprovado-unidade' | 'erro-pedido' | 'cancelado';
 export type RequestPriority = 'baixa' | 'normal' | 'alta' | 'urgente';
+export type QuotationStatus = 'rascunho' | 'enviada' | 'em_analise' | 'finalizada' | 'cancelada';

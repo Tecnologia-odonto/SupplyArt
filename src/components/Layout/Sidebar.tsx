@@ -18,7 +18,8 @@ import {
   XMarkIcon,
   CogIcon,
   ChevronDownIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  ClipboardDocumentIcon
 } from '@heroicons/react/24/outline';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../contexts/AuthContext';
@@ -41,6 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { name: 'Inventário', href: '/inventory', icon: ClipboardDocumentListIcon, show: permissions.canAccessInventory },
     { name: 'Pedidos', href: '/requests', icon: ClipboardDocumentCheckIcon, show: permissions.canAccessRequests },
     { name: 'Compras', href: '/purchases', icon: ShoppingCartIcon, show: permissions.canAccessPurchases },
+    { name: 'Cotações', href: '/quotations', icon: ClipboardDocumentIcon, show: permissions.canAccessQuotations },
     { name: 'Financeiro', href: '/financial', icon: CurrencyDollarIcon, show: permissions.canAccessFinancial },
     { name: 'Movimentações', href: '/movements', icon: ArrowsRightLeftIcon, show: permissions.canAccessMovements },
     { name: 'Usuários', href: '/users', icon: UsersIcon, show: permissions.canManageUsers },

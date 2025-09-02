@@ -19,6 +19,7 @@ interface Permissions {
   canApproveRequests: boolean; // Permissão para aprovar pedidos (almoxarife)
   canManageUnits: boolean; // Permissão para gerenciar unidades
   canAccessCDStock: boolean; // Permissão para acessar estoque CD
+  canAccessQuotations: boolean; // Permissão para acessar cotações (Admin, Gestor, Op. Almoxarife, Op. Financeiro)
 }
 
 const rolePermissions: Record<UserRole, Permissions> = {
@@ -40,6 +41,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canApproveRequests: true,
     canManageUnits: true,
     canAccessCDStock: true,
+    canAccessQuotations: true, // Admin pode tudo
   },
   gestor: {
     canCreate: true,
@@ -59,6 +61,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canApproveRequests: true,
     canManageUnits: true,
     canAccessCDStock: false,
+    canAccessQuotations: true, // Gestor pode ver cotações da sua unidade
   },
   'operador-financeiro': {
     canCreate: true,
@@ -78,6 +81,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canApproveRequests: false, // Não pode aprovar
     canManageUnits: false,
     canAccessCDStock: false,
+    canAccessQuotations: true, // Op. Financeiro pode ver cotações
   },
   'operador-administrativo': {
     canCreate: true,
@@ -97,6 +101,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canApproveRequests: false, // Não pode aprovar
     canManageUnits: false, // Não pode gerenciar unidades
     canAccessCDStock: false,
+    canAccessQuotations: false, // Op. Administrativo NÃO pode ver cotações
   },
   'operador-almoxarife': {
     canCreate: false,
@@ -116,6 +121,7 @@ const rolePermissions: Record<UserRole, Permissions> = {
     canApproveRequests: true, // Pode aprovar/rejeitar pedidos
     canManageUnits: false,
     canAccessCDStock: true,
+    canAccessQuotations: true, // Op. Almoxarife pode ver cotações do seu CD
   },
 };
 

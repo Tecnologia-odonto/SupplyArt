@@ -47,6 +47,13 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const fetchAlerts = async () => {
     if (!profile) return;
 
+    // Verificar se as variáveis de ambiente do Supabase estão configuradas
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+      console.warn('Supabase environment variables not configured');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const today = new Date();
@@ -65,7 +72,10 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         `)
         .not('min_quantity', 'is', null);
 
-      if (stockError) throw stockError;
+      if (stockError) {
+        console.error('Error fetching stock alerts:', stockError);
+        // Continue with other alerts even if stock alerts fail
+      }
 
       // Fetch expiry alerts (inventory items with expired status)
       const { data: expiryAlertsData, error: expiryError } = await supabase
@@ -79,7 +89,10 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         .eq('status', 'expired')
         .limit(5);
 
-      if (expiryError) throw expiryError;
+      if (expiryError) {
+        console.error('Error fetching expiry alerts:', expiryError);
+        // Continue with other alerts even if expiry alerts fail
+      }
 
       // Fetch maintenance alerts (inventory items with upcoming maintenance)
       const { data: maintenanceAlertsData, error: maintenanceError } = await supabase
@@ -97,10 +110,13 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         .order('next_action_date', { ascending: true })
         .limit(5);
 
-      if (maintenanceError) throw maintenanceError;
+      if (maintenanceError) {
+        console.error('Error fetching maintenance alerts:', maintenanceError);
+        // Continue even if maintenance alerts fail
+      }
 
       // Format stock alerts
-      const formattedStockAlerts = stockAlertsData
+      const formattedStockAlerts = (stockAlertsData || [])
         ?.filter(alert => alert.quantity < alert.min_quantity)
         ?.slice(0, 5)
         ?.map(alert => ({
@@ -110,18 +126,18 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         quantity: alert.quantity,
         min_quantity: alert.min_quantity,
         unit_measure: alert.item.unit_measure
-      })) || [];
+      }));
 
       // Format expiry alerts
-      const formattedExpiryAlerts = expiryAlertsData?.map(alert => ({
+      const formattedExpiryAlerts = (expiryAlertsData || [])?.map(alert => ({
         id: alert.id,
         item_name: alert.item.name,
         unit_name: alert.unit.name,
         quantity: alert.quantity
-      })) || [];
+      }));
 
       // Format maintenance alerts
-      const formattedMaintenanceAlerts = maintenanceAlertsData?.map(alert => {
+      const formattedMaintenanceAlerts = (maintenanceAlertsData || [])?.map(alert => {
         const nextDate = new Date(alert.next_action_date);
         const daysRemaining = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         
@@ -131,13 +147,17 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           next_maintenance_date: alert.next_action_date,
           days_remaining: daysRemaining
         };
-      }) || [];
+      });
 
-      setStockAlerts(formattedStockAlerts);
-      setExpiryAlerts(formattedExpiryAlerts);
-      setMaintenanceAlerts(formattedMaintenanceAlerts);
+      setStockAlerts(formattedStockAlerts || []);
+      setExpiryAlerts(formattedExpiryAlerts || []);
+      setMaintenanceAlerts(formattedMaintenanceAlerts || []);
     } catch (error) {
       console.error('Error fetching alerts:', error);
+      // Set empty arrays to prevent UI issues
+      setStockAlerts([]);
+      setExpiryAlerts([]);
+      setMaintenanceAlerts([]);
     } finally {
       setLoading(false);
     }

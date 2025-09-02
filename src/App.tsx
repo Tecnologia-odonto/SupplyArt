@@ -21,6 +21,7 @@ import Financial from './pages/Financial/Financial';
 import Movements from './pages/Movements/Movements';
 import Logs from './pages/Logs/Logs';
 import Users from './pages/Users/Users';
+import Quotations from './pages/Quotations/Quotations';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -86,6 +87,7 @@ function App() {
                       <Route path="/movements" element={<Movements />} />
                       <Route path="/logs" element={<Logs />} />
                       <Route path="/users" element={<Users />} />
+                      <Route path="/quotations" element={<Quotations />} />
                       <Route path="/reset-password" element={<ResetPassword />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
