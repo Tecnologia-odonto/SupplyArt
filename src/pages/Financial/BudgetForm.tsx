@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Unit } from '../../types/database';
 import Button from '../../components/UI/Button';
-import { getTodayBrazilForInput, formatDBDateForInput, formatInputDateForDB } from '../../utils/dateHelper';
+import { formatDBDateForDisplay,  getTodayBrazilForInput, formatDBDateForInput, formatInputDateForDB } from '../../utils/dateHelper';
 import toast from 'react-hot-toast';
 
 interface BudgetFormProps {
