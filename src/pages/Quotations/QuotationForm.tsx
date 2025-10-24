@@ -39,7 +39,16 @@ const QuotationForm: React.FC<QuotationFormProps> = ({ quotation, onSave, onCanc
   const [purchases, setPurchases] = useState<PurchaseWithItems[]>([]);
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseWithItems | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { profile } = useAuth();
+
+  // Validar contexto necessário
+  useEffect(() => {
+    if (!profile) {
+      setError('Dados insuficientes para nova cotação');
+      setLoading(false);
+    }
+  }, [profile]);
 
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
@@ -167,6 +176,21 @@ const QuotationForm: React.FC<QuotationFormProps> = ({ quotation, onSave, onCanc
       toast.error(error.message || 'Erro ao salvar cotação');
     }
   };
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 space-y-4">
+        <div className="text-center">
+          <span className="text-4xl">⚠️</span>
+          <h3 className="mt-2 text-lg font-medium text-gray-900">Dados Insuficientes</h3>
+          <p className="mt-1 text-sm text-gray-600">{error}</p>
+        </div>
+        <Button onClick={onCancel} variant="outline">
+          Voltar
+        </Button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

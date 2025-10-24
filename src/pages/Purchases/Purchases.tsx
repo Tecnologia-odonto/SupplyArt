@@ -62,11 +62,20 @@ const Purchases: React.FC = () => {
       if (profile?.role === 'operador-almoxarife' && profile.unit_id) {
         // Op. Almoxarife: apenas compras do seu CD
         query = query.eq('unit_id', profile.unit_id);
+      } else if (profile?.role === 'operador-administrativo' && profile.unit_id) {
+        // Op. Administrativo: apenas pedidos da sua unidade
+        query = query.eq('unit_id', profile.unit_id);
       } else if (profile?.role === 'admin') {
         // Admin: todas as compras
         // Sem filtro adicional
+      } else if (profile?.role === 'operador-financeiro') {
+        // Op. Financeiro: todas as compras
+        // Sem filtro adicional
+      } else if (profile?.role === 'gestor' && profile.unit_id) {
+        // Gestor: pedidos da sua unidade
+        query = query.eq('unit_id', profile.unit_id);
       } else {
-        // Outros roles não podem acessar compras (apenas CDs fazem compras)
+        // Outros roles não podem acessar compras
         query = query.eq('unit_id', '00000000-0000-0000-0000-000000000000'); // Filtro que não retorna nada
       }
 
@@ -103,7 +112,7 @@ const Purchases: React.FC = () => {
     setEditingPurchase(null);
   };
 
-  const canCreatePurchase = profile?.role && ['admin', 'operador-almoxarife'].includes(profile.role);
+  const canCreatePurchase = profile?.role && ['admin', 'operador-almoxarife', 'operador-administrativo'].includes(profile.role);
   const canEditPurchase = (purchase: any) => {
     if (!profile) return false;
     
@@ -118,14 +127,20 @@ const Purchases: React.FC = () => {
 
   const getVisibilityInfo = () => {
     if (!profile) return '';
-    
+
     switch (profile.role) {
       case 'admin':
         return 'Visualizando: Todas as compras do sistema';
       case 'operador-almoxarife':
         return 'Visualizando: Compras do seu CD';
+      case 'operador-administrativo':
+        return 'Visualizando: Pedidos da sua unidade';
+      case 'gestor':
+        return 'Visualizando: Pedidos da sua unidade';
+      case 'operador-financeiro':
+        return 'Visualizando: Todas as compras do sistema';
       default:
-        return 'Acesso restrito: Apenas CDs podem fazer compras';
+        return 'Acesso restrito';
     }
   };
 
@@ -179,7 +194,7 @@ const Purchases: React.FC = () => {
       title: 'Criado em',
       render: (value: string) => (
         <span className="text-xs sm:text-sm">
-          {new Date(value).toLocaleDateString('pt-BR')}
+          {formatDBDateForDisplay(value)}
         </span>
       )
     },
@@ -222,23 +237,6 @@ const Purchases: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Alerta sobre nova regra de compras */}
-      {profile?.role && !['admin', 'operador-almoxarife'].includes(profile.role) && (
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-          <div className="flex items-start">
-            <ExclamationTriangleIcon className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-blue-800 mb-2">🛒 Nova Regra de Compras</h3>
-              <div className="text-xs text-blue-700 space-y-1">
-                <p><strong>Apenas Centros de Distribuição podem fazer compras</strong></p>
-                <p>• Unidades fazem <strong>Pedidos Internos</strong> que consomem orçamento</p>
-                <p>• CDs fazem <strong>Compras</strong> para reabastecer estoque</p>
-                <p>• Preços são definidos no estoque do CD</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
         <div>

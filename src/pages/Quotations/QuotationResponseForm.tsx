@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import Button from '../../components/UI/Button';
 import Badge from '../../components/UI/Badge';
+import Card from '../../components/UI/Card';
 import toast from 'react-hot-toast';
 
 interface QuotationResponseFormProps {
@@ -27,24 +29,31 @@ interface PriceHistoryItem {
   quotation_title?: string;
 }
 
-const QuotationResponseForm: React.FC<QuotationResponseFormProps> = ({ 
-  quotationId, 
-  item, 
-  suppliers, 
-  onSave, 
-  onCancel 
+const QuotationResponseForm: React.FC<QuotationResponseFormProps> = ({
+  quotationId,
+  item,
+  suppliers,
+  onSave,
+  onCancel
 }) => {
   const [priceHistory, setPriceHistory] = useState<PriceHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>();
 
   const watchedSupplierId = watch('supplier_id');
   const watchedUnitPrice = watch('unit_price');
 
+  // Validar dados necessários
   useEffect(() => {
+    if (!item || !item.item || !item.item.id) {
+      setError('Dados insuficientes para nova cotação');
+      setLoadingHistory(false);
+      return;
+    }
     fetchPriceHistory();
-  }, [item.item.id]);
+  }, [item]);
 
   const fetchPriceHistory = async () => {
     try {
@@ -136,6 +145,22 @@ const QuotationResponseForm: React.FC<QuotationResponseFormProps> = ({
     return priceHistory.find(h => h.supplier_name === suppliers.find(s => s.id === supplierId)?.name);
   };
 
+  // Se houver erro de validação, exibir mensagem
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 space-y-4">
+        <div className="text-center">
+          <span className="text-4xl">⚠️</span>
+          <h3 className="mt-2 text-lg font-medium text-gray-900">Dados Insuficientes</h3>
+          <p className="mt-1 text-sm text-gray-600">{error}</p>
+        </div>
+        <Button onClick={onCancel} variant="outline">
+          Voltar
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
@@ -165,7 +190,7 @@ const QuotationResponseForm: React.FC<QuotationResponseFormProps> = ({
                     R$ {history.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </div>
                   <div className="text-xs text-gray-500">
-                    {new Date(history.purchase_date).toLocaleDateString('pt-BR')}
+                    {formatDBDateForDisplay(history.purchase_date)}
                   </div>
                 </div>
               </div>
@@ -204,7 +229,7 @@ const QuotationResponseForm: React.FC<QuotationResponseFormProps> = ({
               <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
                 <p className="text-xs text-green-700">
                   💡 Último preço deste fornecedor: <strong>R$ {supplierHistory.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> 
-                  em {new Date(supplierHistory.purchase_date).toLocaleDateString('pt-BR')}
+                  em {formatDBDateForDisplay(supplierHistory.purchase_date)}
                 </p>
               </div>
             ) : null;

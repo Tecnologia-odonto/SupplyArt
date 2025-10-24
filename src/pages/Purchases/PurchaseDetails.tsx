@@ -116,14 +116,14 @@ const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({ purchase, onClose }) 
           <div>
             <label className="block text-sm font-medium text-gray-500">Data de Criação</label>
             <p className="mt-1 text-sm text-gray-900">
-              {new Date(purchase.created_at).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(purchase.created_at)}
             </p>
           </div>
           {purchase.updated_at !== purchase.created_at && (
             <div>
               <label className="block text-sm font-medium text-gray-500">Última Atualização</label>
               <p className="mt-1 text-sm text-gray-900">
-                {new Date(purchase.updated_at).toLocaleDateString('pt-BR')}
+                {formatDBDateForDisplay(purchase.updated_at)}
               </p>
             </div>
           )}

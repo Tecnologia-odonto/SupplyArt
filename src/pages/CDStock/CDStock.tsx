@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { PlusIcon, PencilIcon, TrashIcon, FunnelIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -249,7 +250,7 @@ const CDStock: React.FC = () => {
       title: 'Última Atualização',
       render: (value: string) => (
         <span className="text-xs text-gray-500">
-          {new Date(value).toLocaleDateString('pt-BR')}
+          {formatDBDateForDisplay(value)}
         </span>
       )
     },

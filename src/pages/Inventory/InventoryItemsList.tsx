@@ -143,7 +143,7 @@ const InventoryItemsList: React.FC<InventoryItemsListProps> = ({
     {
       key: 'event_date',
       title: 'Data',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'event_type',
@@ -176,7 +176,7 @@ const InventoryItemsList: React.FC<InventoryItemsListProps> = ({
         <div className="space-y-1">
           {value ? (
             <div className="text-sm">
-              {new Date(value).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(value)}
             </div>
           ) : (
             <span className="text-gray-500">-</span>
@@ -254,7 +254,7 @@ const InventoryItemsList: React.FC<InventoryItemsListProps> = ({
               .slice(0, 3)
               .map(event => (
                 <div key={event.id} className="text-xs text-yellow-700">
-                  {new Date(event.next_action_date!).toLocaleDateString('pt-BR')} - {event.description}
+                  {formatDBDateForDisplay(event.next_action_date!)} - {event.description}
                 </div>
               ))}
           </div>

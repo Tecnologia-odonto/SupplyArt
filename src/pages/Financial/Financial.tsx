@@ -353,7 +353,7 @@ const Financial: React.FC = () => {
         return (
           <div>
             <span className="text-sm text-gray-600">
-              {new Date(record.period_start + 'T12:00:00').toLocaleDateString('pt-BR')} - {new Date(record.period_end + 'T12:00:00').toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(record.period_start + 'T12:00:00')} - {formatDBDateForDisplay(record.period_end + 'T12:00:00')}
             </span>
             {daysUntilExpiry <= 7 && daysUntilExpiry > 0 && (
               <div className="text-xs text-warning-600 mt-1">
@@ -546,7 +546,7 @@ const Financial: React.FC = () => {
             <ExclamationTriangleIcon className="h-5 w-5 text-warning-600 mt-0.5 mr-3 flex-shrink-0" />
             <div className="flex-1">
               <h3 className="text-sm font-medium text-warning-800 mb-2">
-                Alertas de Orçamento - {new Date(budgetPeriodFilter).toLocaleDateString('pt-BR')}
+                Alertas de Orçamento - {formatDBDateForDisplay(budgetPeriodFilter)}
               </h3>
               <ul className="text-sm text-warning-700 space-y-1">
                 {budgetAlerts.map((alert, index) => (
@@ -633,7 +633,7 @@ const Financial: React.FC = () => {
         <div className="flex justify-between items-center mb-4">
           <div>
             <h3 className="text-lg font-medium text-gray-900">
-              Orçamentos por Unidade - {new Date(budgetPeriodFilter + 'T12:00:00').toLocaleDateString('pt-BR')}
+              Orçamentos por Unidade - {formatDBDateForDisplay(budgetPeriodFilter + 'T12:00:00')}
             </h3>
             <p className="text-sm text-gray-500">
               Orçamentos válidos para a data de referência selecionada
@@ -656,7 +656,6 @@ const Financial: React.FC = () => {
           data={budgets}
           loading={loading}
           emptyMessage={`Nenhum orçamento encontrado para a data ${formatDateForDisplay(budgetPeriodFilter)}`}
-          emptyMessage={`Nenhum orçamento encontrado para a data ${new Date(budgetPeriodFilter + 'T12:00:00').toLocaleDateString('pt-BR')}`}
         />
       </Card>
 

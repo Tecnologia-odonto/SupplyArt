@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { supabase } from '../../lib/supabase';
 import Badge from '../../components/UI/Badge';
 import Card from '../../components/UI/Card';
@@ -217,7 +218,7 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
             <div>
               <h4 className="text-sm font-medium text-green-800">Pedido Aprovado</h4>
               <p className="text-sm text-green-700 mt-1">
-                Aprovado por {request.approved_by_profile?.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
+                Aprovado por {request.approved_by_profile?.name} em {formatDBDateForDisplay(request.approved_at)}
               </p>
               <p className="text-sm text-green-700 mt-1">
                 💰 Orçamento será consumido quando a unidade confirmar o recebimento
@@ -259,7 +260,7 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
             <div>
               <h4 className="text-sm font-medium text-yellow-800">Pedido Aprovado - Compra Pendente</h4>
               <p className="text-sm text-yellow-700 mt-1">
-                Aprovado por {request.approved_by_profile?.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
+                Aprovado por {request.approved_by_profile?.name} em {formatDBDateForDisplay(request.approved_at)}
               </p>
               <p className="text-sm text-yellow-700 mt-1">
                 ⏳ Aguardando finalização de pedido(s) de compra para poder enviar
@@ -276,7 +277,7 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
               <h4 className="text-sm font-medium text-red-800">Pedido Rejeitado</h4>
               {request.approved_by_profile && request.approved_at && (
                 <p className="text-sm text-red-700 mt-1">
-                  Rejeitado por {request.approved_by_profile.name} em {new Date(request.approved_at).toLocaleDateString('pt-BR')}
+                  Rejeitado por {request.approved_by_profile.name} em {formatDBDateForDisplay(request.approved_at)}
                 </p>
               )}
               {request.rejection_reason && (
@@ -357,13 +358,13 @@ const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose, onApp
           <div>
             <label className="block text-sm font-medium text-gray-500">Data de Criação</label>
             <p className="mt-1 text-sm text-gray-900">
-              {new Date(request.created_at).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(request.created_at)}
             </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-500">Última Atualização</label>
             <p className="mt-1 text-sm text-gray-900">
-              {new Date(request.updated_at).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(request.updated_at)}
             </p>
           </div>
         </div>

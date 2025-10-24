@@ -49,6 +49,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
     allItemsQuoted: boolean;
     quotationDetails: any[];
   }>({ hasQuotations: false, allItemsQuoted: false, quotationDetails: [] });
+  const [activeQuotations, setActiveQuotations] = useState<any[]>([]);
+  const [showQuotationWarning, setShowQuotationWarning] = useState(false);
   const { profile } = useAuth();
 
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -65,7 +67,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
   const watchedUnitId = watch('unit_id');
   const isNewPurchase = !purchase;
   const canEditFinancialInfo = profile?.role && ['admin', 'gestor', 'operador-financeiro'].includes(profile.role);
-  const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-financeiro', 'operador-almoxarife'].includes(profile.role);
+  const canEditStatus = !isNewPurchase && profile?.role && ['admin', 'gestor', 'operador-financeiro', 'operador-almoxarife'].includes(profile.role);
   const isFinalized = purchase?.status === 'finalizado';
   const isBeingFinalized = watchedStatus === 'finalizado' && purchase?.status !== 'finalizado';
 
@@ -142,6 +144,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
   useEffect(() => {
     if (purchase) {
       fetchPurchaseItems();
+      checkActiveQuotations();
     }
   }, [purchase]);
 
@@ -190,6 +193,28 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkActiveQuotations = async () => {
+    if (!purchase) return;
+
+    try {
+      const { data, error } = await supabase
+        .rpc('check_purchase_has_active_quotations', {
+          p_purchase_id: purchase.id
+        });
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const result = data[0];
+        if (result.has_quotations) {
+          setActiveQuotations(result.quotations_list || []);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking active quotations:', error);
     }
   };
 
@@ -277,10 +302,38 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
     return true;
   };
 
+  const invalidateQuotations = async (purchaseId: string) => {
+    try {
+      const { data, error } = await supabase
+        .rpc('invalidate_purchase_quotations', {
+          p_purchase_id: purchaseId
+        });
+
+      if (error) throw error;
+
+      console.log(`${data} cotações foram invalidadas`);
+      return data;
+    } catch (error) {
+      console.error('Error invalidating quotations:', error);
+      throw error;
+    }
+  };
+
   const onSubmit = async (data: FormData) => {
     if (!profile) {
       toast.error('Usuário não encontrado');
       return;
+    }
+
+    // Verificar se há cotações ativas e se o pedido está sendo modificado
+    if (!isNewPurchase && activeQuotations.length > 0) {
+      const confirmMessage = `⚠️ ATENÇÃO: Cotações Vinculadas\n\nEste pedido possui ${activeQuotations.length} cotação(ões) ativa(s):\n${activeQuotations.map((q: any) => `• ${q.title} (${q.status})`).join('\n')}\n\nAo atualizar este pedido, todas as cotações ativas serão marcadas como VENCIDAS e não poderão mais ser utilizadas.\n\nDeseja continuar?`;
+
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
+
+      setShowQuotationWarning(true);
     }
 
     // Validar se há pelo menos um item
@@ -360,6 +413,14 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
 
         if (error) throw error;
         purchaseId = purchase.id;
+
+        // Invalidar cotações se houver e foi confirmado
+        if (activeQuotations.length > 0) {
+          const invalidatedCount = await invalidateQuotations(purchase.id);
+          if (invalidatedCount > 0) {
+            toast.success(`${invalidatedCount} cotação(ões) foram marcadas como vencidas`);
+          }
+        }
 
         // Remover itens existentes se for uma edição completa
         if (canEditFinancialInfo || isNewPurchase) {
@@ -464,6 +525,29 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
 
   return (
     <div className="max-w-4xl mx-auto">
+      {/* Alerta de cotações ativas vinculadas */}
+      {!isNewPurchase && activeQuotations.length > 0 && (
+        <div className="mb-6 bg-orange-50 border border-orange-200 rounded-md p-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <span className="text-orange-600 text-xl">⚠️</span>
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-orange-800">Cotações Ativas Vinculadas</h3>
+              <p className="text-sm text-orange-700 mt-1">
+                Este pedido possui <strong>{activeQuotations.length} cotação(ões) ativa(s)</strong>.
+                Ao atualizar este pedido, todas as cotações ativas serão marcadas como <strong>VENCIDAS</strong> e não poderão mais ser utilizadas.
+              </p>
+              <ul className="mt-2 text-xs text-orange-600 space-y-1">
+                {activeQuotations.map((q: any) => (
+                  <li key={q.id}>• {q.title} - Status: {q.status}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Alerta de compra finalizada */}
       {isFinalized && (
         <div className="mb-6 bg-green-50 border border-green-200 rounded-md p-4">
@@ -474,7 +558,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
             <div className="ml-3">
               <h3 className="text-sm font-medium text-green-800">Compra Finalizada</h3>
               <p className="text-sm text-green-700 mt-1">
-                Esta compra foi finalizada e os itens foram automaticamente adicionados ao estoque. 
+                Esta compra foi finalizada e os itens foram automaticamente adicionados ao estoque.
                 Não é possível editar compras finalizadas.
               </p>
             </div>
@@ -553,7 +637,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                         ✅ Orçamento disponível: R$ {budgetCheck.availableAmount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                       <p className="text-gray-500">
-                        Período: {new Date(budgetCheck.budgetInfo.period_start).toLocaleDateString('pt-BR')} até {new Date(budgetCheck.budgetInfo.period_end).toLocaleDateString('pt-BR')}
+                        Período: {formatDBDateForDisplay(budgetCheck.budgetInfo.period_start)} até {formatDBDateForDisplay(budgetCheck.budgetInfo.period_end)}
                       </p>
                     </div>
                   ) : (
@@ -563,7 +647,7 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
               )}
             </div>
 
-            {canEditStatus && (
+            {canEditStatus && !isNewPurchase && (
               <div>
                 <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
                   Status *
@@ -590,6 +674,22 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
                     ⚠️ Finalizar irá adicionar os itens ao estoque automaticamente
                   </p>
                 )}
+              </div>
+            )}
+            {isNewPurchase && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Status
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  value="Pedido Realizado"
+                  className="block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm text-sm"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Status padrão para novos pedidos
+                </p>
               </div>
             )}
           </div>

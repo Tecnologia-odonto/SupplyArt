@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Unit } from '../../types/database';
 import Button from '../../components/UI/Button';
-import { getTodayBrazilForInput } from '../../utils/dateHelper';
+import { getTodayBrazilForInput, formatDBDateForInput, formatInputDateForDB } from '../../utils/dateHelper';
 import toast from 'react-hot-toast';
 
 interface BudgetFormProps {
@@ -110,11 +110,14 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
     defaultValues: {
       unit_id: budget?.unit_id || '',
       budget_amount: budget?.budget_amount || 0,
-      period_start: budget?.period_start || new Date().toISOString().split('T')[0],
-      period_end: budget?.period_end || (() => {
+      period_start: budget?.period_start ? formatDBDateForInput(budget.period_start) : getTodayBrazilForInput(),
+      period_end: budget?.period_end ? formatDBDateForInput(budget.period_end) : (() => {
         const today = new Date();
         const nextYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-        return nextYear.toISOString().split('T')[0];
+        const year = nextYear.getFullYear();
+        const month = String(nextYear.getMonth() + 1).padStart(2, '0');
+        const day = String(nextYear.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       })(),
     }
   });
@@ -167,8 +170,8 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
 
       if (overlappingBudgets.length > 0) {
         const overlappingBudget = overlappingBudgets[0];
-        const overlappingStart = new Date(overlappingBudget.period_start + 'T12:00:00').toLocaleDateString('pt-BR');
-        const overlappingEnd = new Date(overlappingBudget.period_end + 'T12:00:00').toLocaleDateString('pt-BR');
+        const overlappingStart = formatDBDateForDisplay(overlappingBudget.period_start + 'T12:00:00');
+        const overlappingEnd = formatDBDateForDisplay(overlappingBudget.period_end + 'T12:00:00');
         const overlappingAmount = overlappingBudget.budget_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
         
         toast.error(
@@ -205,8 +208,8 @@ const BudgetForm: React.FC<BudgetFormProps> = ({ budget, onSave, onCancel }) => 
       const budgetData = {
         unit_id: data.unit_id,
         budget_amount: budgetAmount,
-        period_start: data.period_start,
-        period_end: data.period_end,
+        period_start: formatInputDateForDB(data.period_start),
+        period_end: formatInputDateForDB(data.period_end),
       };
 
       console.log('💰 Saving budget with data:', budgetData);

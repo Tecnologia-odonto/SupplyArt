@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { 
   PlusIcon, 
   EyeIcon, 
@@ -494,7 +495,7 @@ const Requests: React.FC = () => {
     {
       key: 'created_at',
       title: 'Criado em',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'actions',

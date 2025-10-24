@@ -201,13 +201,13 @@ const Profile: React.FC = () => {
           <div>
             <label className="block text-sm font-medium text-gray-500">Data de Cadastro</label>
             <p className="mt-1 text-sm text-gray-900">
-              {new Date(profile.created_at).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(profile.created_at)}
             </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-500">Última Atualização</label>
             <p className="mt-1 text-sm text-gray-900">
-              {new Date(profile.updated_at).toLocaleDateString('pt-BR')}
+              {formatDBDateForDisplay(profile.updated_at)}
             </p>
           </div>
         </div>

@@ -261,7 +261,7 @@ const QuotationDetails: React.FC<QuotationDetailsProps> = ({ quotation, onClose,
           <div>
             <label className="block text-sm font-medium text-gray-500">Prazo</label>
             <p className="mt-1 text-sm text-gray-900">
-              {quotation.deadline ? new Date(quotation.deadline).toLocaleDateString('pt-BR') : 'Não definido'}
+              {quotation.deadline ? formatDBDateForDisplay(quotation.deadline) : 'Não definido'}
             </p>
           </div>
           <div>
@@ -383,18 +383,39 @@ const QuotationDetails: React.FC<QuotationDetailsProps> = ({ quotation, onClose,
         title="Nova Cotação do Fornecedor"
         size="lg"
       >
-        {selectedItem && (
-          <QuotationResponseForm
-            quotationId={quotation.id}
-            item={selectedItem}
-            suppliers={suppliers}
-            onSave={handleResponseSaved}
-            onCancel={() => {
-              setResponseModalOpen(false);
-              setSelectedItem(null);
-            }}
-          />
-        )}
+        <React.Suspense fallback={
+          <div className="flex items-center justify-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <span className="ml-2 text-gray-600">Carregando...</span>
+          </div>
+        }>
+          {selectedItem ? (
+            <QuotationResponseForm
+              quotationId={quotation.id}
+              item={selectedItem}
+              suppliers={suppliers}
+              onSave={handleResponseSaved}
+              onCancel={() => {
+                setResponseModalOpen(false);
+                setSelectedItem(null);
+              }}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 space-y-4">
+              <div className="text-center">
+                <span className="text-4xl">⚠️</span>
+                <h3 className="mt-2 text-lg font-medium text-gray-900">Dados Insuficientes</h3>
+                <p className="mt-1 text-sm text-gray-600">Dados insuficientes para nova cotação</p>
+              </div>
+              <Button onClick={() => {
+                setResponseModalOpen(false);
+                setSelectedItem(null);
+              }} variant="outline">
+                Voltar
+              </Button>
+            </div>
+          )}
+        </React.Suspense>
       </Modal>
 
       {/* Modal de Importação */}

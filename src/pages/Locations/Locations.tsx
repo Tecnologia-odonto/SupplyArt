@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { PlusIcon, MapPinIcon, FunnelIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -179,7 +180,7 @@ const Locations: React.FC = () => {
     {
       key: 'created_at',
       title: 'Criado em',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'actions',

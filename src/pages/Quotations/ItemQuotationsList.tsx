@@ -205,7 +205,7 @@ const ItemQuotationsList: React.FC<ItemQuotationsListProps> = ({ itemCode, onClo
       title: 'Prazo',
       render: (value: string | null) => value ? (
         <div>
-          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-sm">{formatDBDateForDisplay(value)}</div>
           {new Date(value) < new Date() && (
             <Badge variant="error" size="sm">Vencido</Badge>
           )}
@@ -215,7 +215,7 @@ const ItemQuotationsList: React.FC<ItemQuotationsListProps> = ({ itemCode, onClo
     {
       key: 'created_at',
       title: 'Criado em',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'actions',

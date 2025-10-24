@@ -184,6 +184,7 @@ const Quotations: React.FC = () => {
       'em_analise': { variant: 'warning' as const, label: 'Em Análise' },
       'finalizada': { variant: 'success' as const, label: 'Finalizada' },
       'cancelada': { variant: 'error' as const, label: 'Cancelada' },
+      'vencida': { variant: 'error' as const, label: 'Vencida' },
     };
 
     const statusInfo = statusMap[status as keyof typeof statusMap] || { variant: 'default' as const, label: status };
@@ -248,7 +249,7 @@ const Quotations: React.FC = () => {
       title: 'Prazo',
       render: (value: string | null) => value ? (
         <div>
-          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-sm">{formatDBDateForDisplay(value)}</div>
           {new Date(value) < new Date() && (
             <Badge variant="error" size="sm">Vencido</Badge>
           )}
@@ -263,7 +264,7 @@ const Quotations: React.FC = () => {
     {
       key: 'created_at',
       title: 'Criado em',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'actions',
@@ -522,14 +523,21 @@ const Quotations: React.FC = () => {
         title={editingQuotation ? 'Editar Cotação' : 'Nova Cotação'}
         size="lg"
       >
-        <QuotationForm
-          quotation={editingQuotation}
-          onSave={handleQuotationSaved}
-          onCancel={() => {
-            setModalOpen(false);
-            setEditingQuotation(null);
-          }}
-        />
+        <React.Suspense fallback={
+          <div className="flex items-center justify-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <span className="ml-2 text-gray-600">Carregando...</span>
+          </div>
+        }>
+          <QuotationForm
+            quotation={editingQuotation}
+            onSave={handleQuotationSaved}
+            onCancel={() => {
+              setModalOpen(false);
+              setEditingQuotation(null);
+            }}
+          />
+        </React.Suspense>
       </Modal>
 
       {/* Modal de Detalhes */}

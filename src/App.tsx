@@ -18,7 +18,6 @@ import Inventory from './pages/Inventory/Inventory';
 import Requests from './pages/Requests/Requests';
 import Purchases from './pages/Purchases/Purchases';
 import Financial from './pages/Financial/Financial';
-import Movements from './pages/Movements/Movements';
 import Logs from './pages/Logs/Logs';
 import Users from './pages/Users/Users';
 import Quotations from './pages/Quotations/Quotations';
@@ -84,7 +83,6 @@ function App() {
                       <Route path="/requests" element={<Requests />} />
                       <Route path="/purchases" element={<Purchases />} />
                       <Route path="/financial" element={<Financial />} />
-                      <Route path="/movements" element={<Movements />} />
                       <Route path="/logs" element={<Logs />} />
                       <Route path="/users" element={<Users />} />
                       <Route path="/quotations" element={<Quotations />} />

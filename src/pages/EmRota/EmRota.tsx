@@ -384,7 +384,7 @@ const EmRota: React.FC = () => {
       title: 'Enviado em',
       render: (value: string) => (
         <div>
-          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-sm">{formatDBDateForDisplay(value)}</div>
           <div className="text-xs text-gray-500">{new Date(value).toLocaleTimeString('pt-BR')}</div>
         </div>
       )
@@ -394,7 +394,7 @@ const EmRota: React.FC = () => {
       title: 'Entregue em',
       render: (value: string | null) => value ? (
         <div>
-          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-sm">{formatDBDateForDisplay(value)}</div>
           <div className="text-xs text-gray-500">{new Date(value).toLocaleTimeString('pt-BR')}</div>
         </div>
       ) : '-'

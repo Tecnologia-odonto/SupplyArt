@@ -1,15 +1,14 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  HomeIcon, 
-  BuildingOffice2Icon, 
-  CubeIcon, 
-  ArchiveBoxIcon, 
+import {
+  HomeIcon,
+  BuildingOffice2Icon,
+  CubeIcon,
+  ArchiveBoxIcon,
   ClipboardDocumentListIcon,
   ClipboardDocumentCheckIcon,
   ShoppingCartIcon,
   CurrencyDollarIcon,
-  ArrowsRightLeftIcon,
   DocumentTextIcon,
   UsersIcon,
   TruckIcon,
@@ -44,7 +43,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { name: 'Compras', href: '/purchases', icon: ShoppingCartIcon, show: permissions.canAccessPurchases },
     { name: 'Cotações', href: '/quotations', icon: ClipboardDocumentIcon, show: permissions.canAccessQuotations },
     { name: 'Financeiro', href: '/financial', icon: CurrencyDollarIcon, show: permissions.canAccessFinancial },
-    { name: 'Movimentações', href: '/movements', icon: ArrowsRightLeftIcon, show: permissions.canAccessMovements },
     { name: 'Usuários', href: '/users', icon: UsersIcon, show: permissions.canManageUsers },
   ];
 

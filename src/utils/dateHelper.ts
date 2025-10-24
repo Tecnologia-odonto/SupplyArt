@@ -285,16 +285,71 @@ export const parseDateBrazil = (dateString: string): Date => {
   if (dateString.includes('T')) {
     return new Date(dateString);
   }
-  
+
   // Se é apenas data (YYYY-MM-DD), adicionar horário meio-dia no Brasil
   const brazilDate = new Date(dateString + 'T12:00:00-03:00');
-  
+
   // Log para debug
   console.log('📅 parseDateBrazil:', {
     input: dateString,
     parsed: brazilDate.toISOString(),
     brazilFormatted: brazilDate.toLocaleDateString('pt-BR', { timeZone: BRAZIL_TIMEZONE })
   });
-  
+
   return brazilDate;
+};
+
+/**
+ * Converte um valor de input[type="date"] para formato YYYY-MM-DD mantendo a data local
+ * Resolve o problema de timezone que faz a data mudar
+ */
+export const formatInputDateForDB = (inputValue: string): string => {
+  if (!inputValue) return '';
+
+  // Input date já vem no formato YYYY-MM-DD
+  // Apenas retorna o valor sem conversão de timezone
+  return inputValue;
+};
+
+/**
+ * Converte uma data do banco (YYYY-MM-DD ou ISO string) para input[type="date"]
+ * Resolve o problema de mostrar data errada no input
+ */
+export const formatDBDateForInput = (dbDate: string | null): string => {
+  if (!dbDate) return '';
+
+  // Se já está no formato YYYY-MM-DD, retorna direto
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dbDate)) {
+    return dbDate;
+  }
+
+  // Se é ISO string ou timestamp, extrair apenas a parte da data
+  const date = new Date(dbDate);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Converte data ISO/timestamp do banco para exibição em português (DD/MM/YYYY)
+ * Resolve problema de exibir dia anterior
+ */
+export const formatDBDateForDisplay = (dbDate: string | null): string => {
+  if (!dbDate) return '-';
+
+  // Se já está no formato YYYY-MM-DD, converter para DD/MM/YYYY
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dbDate)) {
+    const [year, month, day] = dbDate.split('-');
+    return `${day}/${month}/${year}`;
+  }
+
+  // Se é ISO string, usar Date sem conversão de timezone
+  const date = new Date(dbDate);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+
+  return `${day}/${month}/${year}`;
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDBDateForDisplay } from '../../utils/dateHelper';
 import { DocumentTextIcon, EyeIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -139,7 +140,7 @@ const Logs: React.FC = () => {
       title: 'Data/Hora',
       render: (value: string) => (
         <div>
-          <div className="text-sm">{new Date(value).toLocaleDateString('pt-BR')}</div>
+          <div className="text-sm">{formatDBDateForDisplay(value)}</div>
           <div className="text-xs text-gray-500">{new Date(value).toLocaleTimeString('pt-BR')}</div>
         </div>
       )
@@ -344,7 +345,7 @@ const Logs: React.FC = () => {
           columns={columns}
           data={logs}
           loading={loading}
-          emptyMessage={`Nenhum log encontrado no período de ${new Date(startDate).toLocaleDateString('pt-BR')} até ${new Date(endDate).toLocaleDateString('pt-BR')}`}
+          emptyMessage={`Nenhum log encontrado no período de ${formatDBDateForDisplay(startDate)} até ${formatDBDateForDisplay(endDate)}`}
         />
       </Card>
 

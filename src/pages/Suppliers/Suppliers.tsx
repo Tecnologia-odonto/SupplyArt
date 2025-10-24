@@ -142,7 +142,7 @@ const Suppliers: React.FC = () => {
     {
       key: 'created_at',
       title: 'Cadastrado em',
-      render: (value: string) => new Date(value).toLocaleDateString('pt-BR')
+      render: (value: string) => formatDBDateForDisplay(value)
     },
     {
       key: 'actions',
