@@ -103,9 +103,9 @@ const Requests: React.FC = () => {
         .order('created_at', { ascending: false });
 
       // Aplicar filtros baseados no role do usuário
-      if (profile?.role === 'operador-administrativo') {
-        // Op. Administrativo: apenas seus próprios pedidos
-        query = query.eq('requester_id', profile.id);
+      if (profile?.role === 'operador-administrativo' && profile.unit_id) {
+        // Op. Administrativo: todos os pedidos da sua unidade
+        query = query.eq('requesting_unit_id', profile.unit_id);
       } else if (profile?.role === 'operador-financeiro' && profile.unit_id) {
         // Op. Financeiro: pedidos da sua unidade
         query = query.eq('requesting_unit_id', profile.unit_id);
@@ -448,7 +448,11 @@ const Requests: React.FC = () => {
 
   const canApproveReject = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
   const canCreate = permissions.canCreate;
-  const canEdit = permissions.canUpdate;
+
+  // Admin e almoxarife podem editar qualquer pedido (exceto finalizados e cancelados)
+  // Outros usuários seguem as permissões padrão
+  const canEditAnyRequest = profile?.role && ['admin', 'operador-almoxarife'].includes(profile.role);
+  const canEditOwnRequests = permissions.canUpdate;
 
   const columns = [
     {
@@ -512,7 +516,12 @@ const Requests: React.FC = () => {
           >
             <EyeIcon className="w-3 h-3 sm:w-4 sm:h-4" />
           </Button>
-          {canEdit && ['solicitado', 'analisando'].includes(record.status) && (
+          {(
+            // Admin e almoxarife podem editar qualquer pedido não finalizado/cancelado
+            (canEditAnyRequest && !['aprovado-unidade', 'cancelado'].includes(record.status)) ||
+            // Outros usuários só podem editar pedidos em análise
+            (canEditOwnRequests && ['solicitado', 'analisando'].includes(record.status))
+          ) && (
             <Button
               size="sm"
               variant="outline"

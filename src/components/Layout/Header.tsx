@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BellIcon, Bars3Icon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -16,6 +16,7 @@ interface StockAlert {
   quantity: number;
   min_quantity: number;
   unit_measure: string;
+  type: 'stock' | 'cd_stock';
 }
 
 interface ExpiryAlert {
@@ -32,16 +33,62 @@ interface MaintenanceAlert {
   days_remaining: number;
 }
 
+interface RequestAlert {
+  id: string;
+  requesting_unit_name: string;
+  status: string;
+  created_at: string;
+  priority: string;
+}
+
 const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { signOut, profile } = useAuth();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
   const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlert[]>([]);
   const [maintenanceAlerts, setMaintenanceAlerts] = useState<MaintenanceAlert[]>([]);
+  const [requestAlerts, setRequestAlerts] = useState<RequestAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasNewNotification, setHasNewNotification] = useState(false);
+  const previousCountRef = useRef(0);
 
   useEffect(() => {
     fetchAlerts();
+
+    // Setup Realtime subscriptions
+    const stockChannel = supabase
+      .channel('stock-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'stock' },
+        () => {
+          console.log('📦 Stock changed, refreshing alerts...');
+          fetchAlerts();
+        }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'cd_stock' },
+        () => {
+          console.log('📦 CD Stock changed, refreshing alerts...');
+          fetchAlerts();
+        }
+      )
+      .subscribe();
+
+    const requestChannel = supabase
+      .channel('request-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'requests' },
+        () => {
+          console.log('📋 Request changed, refreshing alerts...');
+          fetchAlerts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(stockChannel);
+      supabase.removeChannel(requestChannel);
+    };
   }, [profile]);
 
   const fetchAlerts = async () => {
@@ -74,7 +121,50 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
 
       if (stockError) {
         console.error('Error fetching stock alerts:', stockError);
-        // Continue with other alerts even if stock alerts fail
+      }
+
+      // Fetch CD stock alerts (items with quantity below min_quantity)
+      const { data: cdStockAlertsData, error: cdStockError } = await supabase
+        .from('cd_stock')
+        .select(`
+          id,
+          quantity,
+          min_quantity,
+          item:items(name, unit_measure),
+          unit:units(name)
+        `)
+        .not('min_quantity', 'is', null);
+
+      if (cdStockError) {
+        console.error('Error fetching CD stock alerts:', cdStockError);
+      }
+
+      // Fetch request alerts (pending requests for approval)
+      let requestQuery = supabase
+        .from('requests')
+        .select(`
+          id,
+          status,
+          priority,
+          created_at,
+          requesting_unit:units!requests_requesting_unit_id_fkey(name)
+        `)
+        .in('status', ['solicitado', 'analisando', 'aprovado-pendente']);
+
+      // Filter based on user role
+      if (profile.role === 'operador-almoxarife' || profile.role === 'admin') {
+        // Show all pending requests
+      } else if (profile.unit_id) {
+        // Show only requests from user's unit
+        requestQuery = requestQuery.eq('requesting_unit_id', profile.unit_id);
+      }
+
+      const { data: requestAlertsData, error: requestError } = await requestQuery
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (requestError) {
+        console.error('Error fetching request alerts:', requestError);
       }
 
       // Fetch expiry alerts (inventory items with expired status)
@@ -115,17 +205,45 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         // Continue even if maintenance alerts fail
       }
 
-      // Format stock alerts
+      // Format stock alerts (unidades)
       const formattedStockAlerts = (stockAlertsData || [])
         ?.filter(alert => alert.quantity < alert.min_quantity)
-        ?.slice(0, 5)
         ?.map(alert => ({
+          id: alert.id,
+          item_name: alert.item.name,
+          unit_name: alert.unit.name,
+          quantity: alert.quantity,
+          min_quantity: alert.min_quantity,
+          unit_measure: alert.item.unit_measure,
+          type: 'stock' as const
+        }));
+
+      // Format CD stock alerts
+      const formattedCdStockAlerts = (cdStockAlertsData || [])
+        ?.filter(alert => alert.quantity < alert.min_quantity)
+        ?.map(alert => ({
+          id: alert.id,
+          item_name: alert.item.name,
+          unit_name: alert.unit.name,
+          quantity: alert.quantity,
+          min_quantity: alert.min_quantity,
+          unit_measure: alert.item.unit_measure,
+          type: 'cd_stock' as const
+        }));
+
+      // Combine and limit stock alerts
+      const allStockAlerts = [
+        ...(formattedStockAlerts || []),
+        ...(formattedCdStockAlerts || [])
+      ].slice(0, 10);
+
+      // Format request alerts
+      const formattedRequestAlerts = (requestAlertsData || [])?.map(alert => ({
         id: alert.id,
-        item_name: alert.item.name,
-        unit_name: alert.unit.name,
-        quantity: alert.quantity,
-        min_quantity: alert.min_quantity,
-        unit_measure: alert.item.unit_measure
+        requesting_unit_name: alert.requesting_unit.name,
+        status: alert.status,
+        created_at: alert.created_at,
+        priority: alert.priority
       }));
 
       // Format expiry alerts
@@ -149,15 +267,38 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         };
       });
 
-      setStockAlerts(formattedStockAlerts || []);
+      // Calculate total notifications
+      const totalCount =
+        (allStockAlerts?.length || 0) +
+        (formattedExpiryAlerts?.length || 0) +
+        (formattedMaintenanceAlerts?.length || 0) +
+        (formattedRequestAlerts?.length || 0);
+
+      // Detect new notifications
+      if (previousCountRef.current > 0 && totalCount > previousCountRef.current) {
+        setHasNewNotification(true);
+        // Play notification sound (optional)
+        try {
+          const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHmm98OafTwwPUKng77RgGgU7k9n0y3opBSl+zPLaizsIGGS57OihUQ0MW6zn7rFeHQU6kdnzzn0vBSh5ye/glEIKEmm98+mjUw0OWqzl7q9dGgU6k9n0y3spBSh4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIKEmm98+mjUw0OWqzn7qtdGgU6k9n0y3spBSl4yO/blEIK');
+          audio.volume = 0.3;
+          audio.play().catch(() => {}); // Ignore if autoplay blocked
+        } catch (e) {
+          // Ignore audio errors
+        }
+      }
+      previousCountRef.current = totalCount;
+
+      setStockAlerts(allStockAlerts || []);
       setExpiryAlerts(formattedExpiryAlerts || []);
       setMaintenanceAlerts(formattedMaintenanceAlerts || []);
+      setRequestAlerts(formattedRequestAlerts || []);
     } catch (error) {
       console.error('Error fetching alerts:', error);
       // Set empty arrays to prevent UI issues
       setStockAlerts([]);
       setExpiryAlerts([]);
       setMaintenanceAlerts([]);
+      setRequestAlerts([]);
     } finally {
       setLoading(false);
     }
@@ -167,7 +308,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
     return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
 
-  const totalNotifications = stockAlerts.length + expiryAlerts.length + maintenanceAlerts.length;
+  const totalNotifications = stockAlerts.length + expiryAlerts.length + maintenanceAlerts.length + requestAlerts.length;
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
@@ -195,13 +336,20 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           <div className="relative">
             <button
               type="button"
-              className="bg-white p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              className={`bg-white p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all ${
+                hasNewNotification ? 'animate-bounce' : ''
+              }`}
+              onClick={() => {
+                setNotificationsOpen(!notificationsOpen);
+                setHasNewNotification(false);
+              }}
             >
               <span className="sr-only">Ver notificações</span>
               <BellIcon className="h-6 w-6" aria-hidden="true" />
               {totalNotifications > 0 && (
-                <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-400 ring-2 ring-white"></span>
+                <span className="absolute -top-1 -right-1 flex items-center justify-center h-5 w-5 rounded-full bg-red-500 ring-2 ring-white text-white text-xs font-bold">
+                  {totalNotifications > 9 ? '9+' : totalNotifications}
+                </span>
               )}
             </button>
 
@@ -222,13 +370,29 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                       <span className="ml-2 text-xs text-gray-500">Carregando...</span>
                     </div>
                   ) : (
-                    <div className="max-h-60 overflow-y-auto">
+                    <div className="max-h-96 overflow-y-auto">
+                      {requestAlerts.length > 0 && (
+                        <div className="px-4 py-2 border-b border-gray-100">
+                          <h4 className="text-xs font-medium text-primary-800">Pedidos Pendentes</h4>
+                          {requestAlerts.map(alert => (
+                            <div key={alert.id} className="mt-1 text-xs text-gray-600">
+                              • {alert.requesting_unit_name} - {
+                                alert.status === 'solicitado' ? 'Aguardando Análise' :
+                                alert.status === 'analisando' ? 'Em Análise' :
+                                'Aguardando Compra'
+                              } {alert.priority === 'urgente' && '🔴'}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {stockAlerts.length > 0 && (
                         <div className="px-4 py-2 border-b border-gray-100">
                           <h4 className="text-xs font-medium text-warning-800">Estoque Baixo</h4>
                           {stockAlerts.map(alert => (
                             <div key={alert.id} className="mt-1 text-xs text-gray-600">
-                              • {alert.item_name} ({alert.unit_name}): {alert.quantity} de {alert.min_quantity} {alert.unit_measure}
+                              {alert.type === 'cd_stock' ? '📦 CD - ' : '🏢 '}
+                              {alert.item_name} ({alert.unit_name}): {alert.quantity} de {alert.min_quantity} {alert.unit_measure}
                             </div>
                           ))}
                         </div>

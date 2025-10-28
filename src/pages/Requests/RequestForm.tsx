@@ -70,8 +70,18 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   const isNewRequest = !request;
   const canEditStatus = profile?.role && ['admin', 'gestor', 'operador-almoxarife'].includes(profile.role);
   const canEditItems = !request || ['solicitado', 'analisando'].includes(request.status || '');
-  const canChangeStatus = canEditStatus && request && !['aprovado-unidade', 'cancelado'].includes(request.status || '');
+
+  // Op. almoxarife e admin podem editar status de pedidos (exceto finalizados e cancelados)
+  const canChangeStatus = canEditStatus && (!request || !['aprovado-unidade', 'cancelado'].includes(request.status || ''));
+
+  // Operador administrativo pode editar apenas pedidos da sua unidade quando status = enviado
+  const isAdminOfRequestingUnit = profile?.role === 'operador-administrativo' && profile?.unit_id === request?.requesting_unit_id;
+  const canAdminEditStatus = isAdminOfRequestingUnit && request && ['enviado', 'recebido'].includes(request.status || '');
+
   const needsApproval = request && ['solicitado', 'analisando'].includes(request.status);
+
+  // Permitir edição se for operador almoxarife/gestor/admin OU se for admin da unidade em status permitido
+  const canEdit = canChangeStatus || canAdminEditStatus;
 
   useEffect(() => {
     fetchData();
@@ -564,6 +574,229 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
     }
   };
 
+  const debitRequestBudget = async (unitId: string, amount: number, requestId: string) => {
+    try {
+      console.log('💸 Debiting budget for request:', { unitId, amount, requestId });
+
+      const today = getTodayBrazilForInput();
+
+      const { data: budget, error: fetchError } = await supabase
+        .from('unit_budgets')
+        .select('*')
+        .eq('unit_id', unitId)
+        .lte('period_start', today)
+        .gte('period_end', today)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!budget) {
+        throw new Error('Orçamento não encontrado para a unidade');
+      }
+
+      const newUsedAmount = (budget.used_amount || 0) + amount;
+      const newAvailableAmount = budget.budget_amount - newUsedAmount;
+
+      const { error: updateError } = await supabase
+        .from('unit_budgets')
+        .update({
+          used_amount: newUsedAmount,
+          available_amount: newAvailableAmount
+        })
+        .eq('id', budget.id);
+
+      if (updateError) throw updateError;
+
+      const { error: requestError } = await supabase
+        .from('requests')
+        .update({ budget_id: budget.id })
+        .eq('id', requestId);
+
+      if (requestError) throw requestError;
+
+      console.log('✅ Budget debited successfully');
+      await fetchUnitBudget(unitId);
+      return budget.id;
+    } catch (error) {
+      console.error('Error debiting budget:', error);
+      throw error;
+    }
+  };
+
+  const creditRequestBudget = async (requestId: string, amount: number) => {
+    try {
+      console.log('💰 Crediting budget back for request:', { requestId, amount });
+
+      const { data: requestData, error: requestError } = await supabase
+        .from('requests')
+        .select('budget_id, requesting_unit_id')
+        .eq('id', requestId)
+        .maybeSingle();
+
+      if (requestError) throw requestError;
+      if (!requestData?.budget_id) {
+        console.warn('⚠️ Request has no associated budget');
+        return;
+      }
+
+      const { data: budget, error: fetchError } = await supabase
+        .from('unit_budgets')
+        .select('*')
+        .eq('id', requestData.budget_id)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!budget) {
+        throw new Error('Orçamento não encontrado');
+      }
+
+      const newUsedAmount = Math.max(0, (budget.used_amount || 0) - amount);
+      const newAvailableAmount = budget.budget_amount - newUsedAmount;
+
+      const { error: updateError } = await supabase
+        .from('unit_budgets')
+        .update({
+          used_amount: newUsedAmount,
+          available_amount: newAvailableAmount
+        })
+        .eq('id', budget.id);
+
+      if (updateError) throw updateError;
+
+      const { error: removeBudgetError } = await supabase
+        .from('requests')
+        .update({ budget_id: null })
+        .eq('id', requestId);
+
+      if (removeBudgetError) throw removeBudgetError;
+
+      console.log('✅ Budget credited back successfully');
+      await fetchUnitBudget(requestData.requesting_unit_id);
+    } catch (error) {
+      console.error('Error crediting budget:', error);
+      throw error;
+    }
+  };
+
+  const moveToEmRota = async (requestId: string) => {
+    try {
+      // Buscar itens do pedido
+      const { data: requestItems, error: itemsError } = await supabase
+        .from('request_items')
+        .select('*, item:items(*)')
+        .eq('request_id', requestId);
+
+      if (itemsError) throw itemsError;
+      if (!requestItems || requestItems.length === 0) return;
+
+      // Buscar dados do pedido
+      const { data: requestData, error: requestError } = await supabase
+        .from('requests')
+        .select('cd_unit_id, requesting_unit_id')
+        .eq('id', requestId)
+        .maybeSingle();
+
+      if (requestError) throw requestError;
+      if (!requestData) throw new Error('Pedido não encontrado');
+
+      // Para cada item, remover do estoque CD e adicionar ao em_rota
+      for (const item of requestItems) {
+        // Remover do estoque CD
+        const { data: cdStock, error: cdStockError } = await supabase
+          .from('cd_stock')
+          .select('*')
+          .eq('unit_id', requestData.cd_unit_id)
+          .eq('item_id', item.item_id)
+          .maybeSingle();
+
+        if (cdStockError) throw cdStockError;
+
+        if (cdStock) {
+          const newQuantity = cdStock.quantity - item.quantity_approved;
+          await supabase
+            .from('cd_stock')
+            .update({ quantity: newQuantity })
+            .eq('id', cdStock.id);
+        }
+
+        // Adicionar ao em_rota
+        const { error: emRotaError } = await supabase
+          .from('em_rota')
+          .insert({
+            item_id: item.item_id,
+            quantity: item.quantity_approved,
+            source_unit_id: requestData.cd_unit_id,
+            destination_unit_id: requestData.requesting_unit_id,
+            request_id: requestId,
+            status: 'em-transito'
+          });
+
+        if (emRotaError) throw emRotaError;
+      }
+
+      console.log('✅ Items moved to em_rota successfully');
+    } catch (error) {
+      console.error('Error moving to em_rota:', error);
+      throw error;
+    }
+  };
+
+  const addToUnitStock = async (requestId: string, unitId: string) => {
+    try {
+      // Buscar itens do pedido
+      const { data: requestItems, error: itemsError } = await supabase
+        .from('request_items')
+        .select('*')
+        .eq('request_id', requestId);
+
+      if (itemsError) throw itemsError;
+      if (!requestItems || requestItems.length === 0) return;
+
+      // Para cada item, adicionar ao estoque da unidade
+      for (const item of requestItems) {
+        // Verificar se item já existe no estoque
+        const { data: existingStock, error: stockError } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('unit_id', unitId)
+          .eq('item_id', item.item_id)
+          .maybeSingle();
+
+        if (stockError) throw stockError;
+
+        if (existingStock) {
+          // Atualizar quantidade existente
+          const newQuantity = existingStock.quantity + item.quantity_approved;
+          await supabase
+            .from('stock')
+            .update({ quantity: newQuantity })
+            .eq('id', existingStock.id);
+        } else {
+          // Criar novo registro de estoque
+          await supabase
+            .from('stock')
+            .insert({
+              unit_id: unitId,
+              item_id: item.item_id,
+              quantity: item.quantity_approved,
+              min_quantity: 0
+            });
+        }
+
+        // Atualizar status em em_rota para 'entregue'
+        await supabase
+          .from('em_rota')
+          .update({ status: 'entregue' })
+          .eq('request_id', requestId)
+          .eq('item_id', item.item_id);
+      }
+
+      console.log('✅ Items added to unit stock successfully');
+    } catch (error) {
+      console.error('Error adding to unit stock:', error);
+      throw error;
+    }
+  };
+
   const addItem = () => {
     // Verificar se a unidade tem orçamento antes de permitir adicionar itens
     if (!unitBudget) {
@@ -673,6 +906,18 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       let requestId: string;
 
       if (request) {
+        // Verificar mudanças de status para gerenciar orçamento e estoque
+        const oldStatus = request.status;
+        const newStatus = requestData.status;
+        const statusChanged = oldStatus !== newStatus;
+
+        // Detectar mudanças de status
+        const isBeingApproved = statusChanged && newStatus === 'aprovado' && oldStatus !== 'aprovado';
+        const isLeavingApproved = statusChanged && oldStatus === 'aprovado' && !['preparando', 'enviado', 'recebido', 'aprovado-unidade'].includes(newStatus);
+        const isBeingSent = statusChanged && newStatus === 'enviado' && oldStatus !== 'enviado';
+        const isBeingReceived = statusChanged && newStatus === 'recebido' && oldStatus !== 'recebido';
+        const isBeingFinalized = statusChanged && newStatus === 'aprovado-unidade' && oldStatus !== 'aprovado-unidade';
+
         // Atualizar pedido existente
         const { error } = await supabase
           .from('requests')
@@ -681,6 +926,48 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
         if (error) throw error;
         requestId = request.id;
+
+        // Gerenciar orçamento e estoque baseado em mudanças de status
+        if (isBeingApproved && totalCost > 0) {
+          // Debitar orçamento parcialmente ao aprovar
+          console.log('✅ Request approved, debiting budget partially...');
+          await debitRequestBudget(data.requesting_unit_id, totalCost, requestId);
+          toast.success(`💸 R$ ${totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} reservados do orçamento`);
+        } else if (isLeavingApproved && request.total_estimated_cost && request.total_estimated_cost > 0) {
+          // Creditar orçamento de volta ao sair de aprovado (cancelamento, erro, etc)
+          console.log('↩️ Request status changed from approved, crediting budget back...');
+          await creditRequestBudget(requestId, request.total_estimated_cost);
+          toast.success(`💰 R$ ${request.total_estimated_cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} devolvidos ao orçamento`);
+        } else if (isBeingSent) {
+          // Movimentar do estoque CD para em_rota
+          console.log('📦 Moving items from CD stock to em_rota...');
+          await moveToEmRota(requestId);
+          toast.success('📦 Itens movidos para Em Rota');
+        } else if (isBeingReceived) {
+          // Adicionar itens ao estoque da unidade solicitante
+          console.log('📥 Adding items to requesting unit stock...');
+          await addToUnitStock(requestId, data.requesting_unit_id);
+          toast.success('📥 Itens adicionados ao estoque da unidade');
+        } else if (isBeingFinalized && request.total_estimated_cost && request.total_estimated_cost > 0) {
+          // Consumir orçamento definitivamente
+          console.log('🎯 Finalizing request, consuming budget...');
+          const { data: budgetCheck } = await supabase
+            .from('requests')
+            .select('budget_id, budget_consumed')
+            .eq('id', requestId)
+            .maybeSingle();
+
+          if (!budgetCheck?.budget_consumed) {
+            await supabase
+              .from('requests')
+              .update({
+                budget_consumed: true,
+                budget_consumption_date: new Date().toISOString()
+              })
+              .eq('id', requestId);
+            toast.success('🎯 Pedido finalizado! Orçamento consumido definitivamente.');
+          }
+        }
 
         // Criar log de auditoria
         await createAuditLog({
@@ -809,15 +1096,18 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   };
 
   const totalEstimatedCost = getTotalEstimatedCost();
-  const hasBudget = unitBudget !== null;
-  const budgetSufficient = hasBudget && totalEstimatedCost <= unitBudget.available_amount;
-  const budgetExceeded = hasBudget && totalEstimatedCost > unitBudget.available_amount;
+
+  // Admin e Almoxarife não precisam de orçamento na própria unidade (editam pedidos de outras unidades)
+  const needsBudgetCheck = !['admin', 'operador-almoxarife'].includes(profile?.role || '');
+  const hasBudget = unitBudget !== null || !needsBudgetCheck;
+  const budgetSufficient = unitBudget ? totalEstimatedCost <= unitBudget.available_amount : true;
+  const budgetExceeded = unitBudget ? totalEstimatedCost > unitBudget.available_amount : false;
 
   return (
     <div className="max-w-4xl mx-auto">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Alerta de Orçamento */}
-        {watchedRequestingUnitId && !hasBudget && (
+        {watchedRequestingUnitId && !unitBudget && needsBudgetCheck && (
           <div className="bg-red-50 border border-red-200 rounded-md p-4">
             <div className="flex items-start">
               <div className="flex-shrink-0">
@@ -952,21 +1242,48 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
                 </label>
                 <select
                   id="status"
-                  disabled={needsApproval}
+                  disabled={!canEdit}
                   className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm ${
-                    needsApproval ? 'bg-gray-100' : ''
+                    !canEdit ? 'bg-gray-100' : ''
                   }`}
                   {...register('status')}
                 >
                   {statusOptions
                     .filter(option => {
+                      // Op. Administrativo: quando status = enviado, pode mudar para recebido/aprovado-unidade/erro/cancelado
+                      if (isAdminOfRequestingUnit && request?.status === 'enviado') {
+                        return ['enviado', 'recebido', 'aprovado-unidade', 'erro-pedido', 'cancelado'].includes(option.value);
+                      }
+                      // Op. Administrativo: quando status = recebido, pode mudar para aprovado-unidade/erro/cancelado
+                      if (isAdminOfRequestingUnit && request?.status === 'recebido') {
+                        return ['recebido', 'aprovado-unidade', 'erro-pedido', 'cancelado'].includes(option.value);
+                      }
+
+                      // Admin e almoxarife podem mudar para qualquer status (exceto se finalizado/cancelado)
+                      if (canEditStatus && !needsApproval) {
+                        // Se não está finalizado ou cancelado, mostrar todos os status válidos
+                        if (!request || !['aprovado-unidade', 'cancelado'].includes(request.status)) {
+                          return true;
+                        }
+                      }
+
                       // Se precisa aprovação, mostrar apenas status atual
                       if (needsApproval) {
                         return option.value === request?.status;
                       }
-                      // Se já foi aprovado/rejeitado, permitir apenas status posteriores
+
+                      // Fluxo padrão baseado no status atual
                       if (request?.status === 'aprovado') {
-                        return ['aprovado', 'preparando', 'enviado', 'erro-pedido'].includes(option.value);
+                        return ['aprovado', 'preparando', 'enviado', 'erro-pedido', 'cancelado'].includes(option.value);
+                      }
+                      if (request?.status === 'preparando') {
+                        return ['preparando', 'enviado', 'erro-pedido', 'cancelado'].includes(option.value);
+                      }
+                      if (request?.status === 'enviado') {
+                        return ['enviado', 'recebido', 'erro-pedido'].includes(option.value);
+                      }
+                      if (request?.status === 'recebido') {
+                        return ['recebido', 'aprovado-unidade'].includes(option.value);
                       }
                       if (request?.status === 'rejeitado') {
                         return ['rejeitado'].includes(option.value);

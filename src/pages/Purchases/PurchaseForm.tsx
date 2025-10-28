@@ -284,15 +284,118 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       };
     }
     console.log('✅ Budget found:', budgetInfo);
-    
+
     const canPurchase = budgetInfo.available_amount >= amount;
-    return { 
-      hasValidBudget: true, 
-      canPurchase, 
+    return {
+      hasValidBudget: true,
+      canPurchase,
       availableAmount: budgetInfo.available_amount,
       budgetInfo,
       message: canPurchase ? 'Orçamento suficiente' : 'Valor excede orçamento disponível'
     };
+  };
+
+  const debitBudget = async (unitId: string, amount: number, purchaseId: string) => {
+    try {
+      console.log('💸 Debiting budget:', { unitId, amount, purchaseId });
+
+      const today = getTodayBrazilForInput();
+
+      const { data: budget, error: fetchError } = await supabase
+        .from('unit_budgets')
+        .select('*')
+        .eq('unit_id', unitId)
+        .lte('period_start', today)
+        .gte('period_end', today)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!budget) {
+        throw new Error('Orçamento não encontrado para a unidade');
+      }
+
+      const newUsedAmount = (budget.used_amount || 0) + amount;
+      const newAvailableAmount = budget.budget_amount - newUsedAmount;
+
+      const { error: updateError } = await supabase
+        .from('unit_budgets')
+        .update({
+          used_amount: newUsedAmount,
+          available_amount: newAvailableAmount
+        })
+        .eq('id', budget.id);
+
+      if (updateError) throw updateError;
+
+      const { error: purchaseError } = await supabase
+        .from('purchases')
+        .update({ budget_id: budget.id })
+        .eq('id', purchaseId);
+
+      if (purchaseError) throw purchaseError;
+
+      console.log('✅ Budget debited successfully');
+      await fetchData();
+      return budget.id;
+    } catch (error) {
+      console.error('Error debiting budget:', error);
+      throw error;
+    }
+  };
+
+  const creditBudget = async (purchaseId: string, amount: number) => {
+    try {
+      console.log('💰 Crediting budget back:', { purchaseId, amount });
+
+      const { data: purchase, error: purchaseError } = await supabase
+        .from('purchases')
+        .select('budget_id')
+        .eq('id', purchaseId)
+        .maybeSingle();
+
+      if (purchaseError) throw purchaseError;
+      if (!purchase?.budget_id) {
+        console.warn('⚠️ Purchase has no associated budget');
+        return;
+      }
+
+      const { data: budget, error: fetchError } = await supabase
+        .from('unit_budgets')
+        .select('*')
+        .eq('id', purchase.budget_id)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!budget) {
+        throw new Error('Orçamento não encontrado');
+      }
+
+      const newUsedAmount = Math.max(0, (budget.used_amount || 0) - amount);
+      const newAvailableAmount = budget.budget_amount - newUsedAmount;
+
+      const { error: updateError } = await supabase
+        .from('unit_budgets')
+        .update({
+          used_amount: newUsedAmount,
+          available_amount: newAvailableAmount
+        })
+        .eq('id', budget.id);
+
+      if (updateError) throw updateError;
+
+      const { error: removeBudgetError } = await supabase
+        .from('purchases')
+        .update({ budget_id: null })
+        .eq('id', purchaseId);
+
+      if (removeBudgetError) throw removeBudgetError;
+
+      console.log('✅ Budget credited back successfully');
+      await fetchData();
+    } catch (error) {
+      console.error('Error crediting budget:', error);
+      throw error;
+    }
   };
 
   const validatePurchaseForFinalization = () => {
@@ -360,19 +463,39 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       }
       
       setIsFinalizingPurchase(true);
-      
+
+      // Verificar se já foi debitado
+      const { data: budgetCheck } = await supabase
+        .from('purchases')
+        .select('budget_id')
+        .eq('id', purchase!.id)
+        .maybeSingle();
+
+      const alreadyDebited = !!budgetCheck?.budget_id;
+
       // Confirmar finalização
-      const confirmMessage = `
+      const confirmMessage = alreadyDebited
+        ? `
         ⚠️ ATENÇÃO: Finalizar Compra
-        
+
+        Ao finalizar esta compra:
+        • Os itens serão automaticamente adicionados ao estoque da unidade
+        • A compra não poderá mais ser editada
+        • O orçamento já foi debitado anteriormente
+
+        Deseja continuar?
+      `
+        : `
+        ⚠️ ATENÇÃO: Finalizar Compra
+
         Ao finalizar esta compra:
         • Os itens serão automaticamente adicionados ao estoque da unidade
         • A compra não poderá mais ser editada
         • O valor será debitado do orçamento da unidade
-        
+
         Deseja continuar?
       `;
-      
+
       if (!window.confirm(confirmMessage)) {
         setIsFinalizingPurchase(false);
         return;
@@ -415,6 +538,17 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       let purchaseId: string;
 
       if (purchase) {
+        // Verificar mudanças de status para gerenciar orçamento
+        const oldStatus = purchase.status;
+        const newStatus = purchaseData.status;
+        const statusChanged = oldStatus !== newStatus;
+
+        // Detectar se está mudando PARA "comprado-aguardando"
+        const isBeingPurchased = statusChanged && newStatus === 'comprado-aguardando' && oldStatus !== 'comprado-aguardando';
+
+        // Detectar se está saindo de "comprado-aguardando" (cancelamento ou mudança para outro status que não seja finalizado)
+        const isLeavingPurchased = statusChanged && oldStatus === 'comprado-aguardando' && newStatus !== 'comprado-aguardando' && newStatus !== 'finalizado';
+
         // Atualizar compra existente
         const { error } = await supabase
           .from('purchases')
@@ -423,6 +557,19 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
 
         if (error) throw error;
         purchaseId = purchase.id;
+
+        // Gerenciar orçamento baseado em mudanças de status
+        if (isBeingPurchased && calculatedTotal > 0) {
+          // Debitar orçamento ao marcar como "comprado-aguardando"
+          console.log('🛒 Purchase status changed to "comprado-aguardando", debiting budget...');
+          await debitBudget(data.unit_id, calculatedTotal, purchaseId);
+          toast.success(`💸 R$ ${calculatedTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} debitados do orçamento`);
+        } else if (isLeavingPurchased && purchase.total_value && purchase.total_value > 0) {
+          // Creditar orçamento de volta ao sair de "comprado-aguardando"
+          console.log('↩️ Purchase status changed from "comprado-aguardando", crediting budget back...');
+          await creditBudget(purchaseId, purchase.total_value);
+          toast.success(`💰 R$ ${purchase.total_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} devolvidos ao orçamento`);
+        }
 
         // Invalidar cotações se houver e foi confirmado
         if (activeQuotations.length > 0) {
@@ -494,9 +641,26 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
         });
       }
 
-      if (isBeingFinalized) {
-        toast.success('🎉 Compra finalizada com sucesso! Os itens foram adicionados ao estoque automaticamente.');
-      } else {
+      // Gerenciar débito do orçamento na finalização
+      if (isBeingFinalized && calculatedTotal > 0) {
+        // Verificar se já foi debitado anteriormente (se veio de "comprado-aguardando")
+        const { data: purchaseCheck } = await supabase
+          .from('purchases')
+          .select('budget_id')
+          .eq('id', purchaseId)
+          .maybeSingle();
+
+        if (!purchaseCheck?.budget_id) {
+          // Ainda não foi debitado, debitar agora
+          console.log('💳 Finalizing purchase, debiting budget...');
+          await debitBudget(data.unit_id, calculatedTotal, purchaseId);
+          toast.success('🎉 Compra finalizada com sucesso! Os itens foram adicionados ao estoque e o orçamento foi debitado.');
+        } else {
+          // Já foi debitado anteriormente
+          console.log('✅ Budget already debited, skipping...');
+          toast.success('🎉 Compra finalizada com sucesso! Os itens foram adicionados ao estoque.');
+        }
+      } else if (!isBeingFinalized) {
         toast.success(purchase ? 'Compra atualizada com sucesso!' : 'Pedido de compra criado com sucesso!');
       }
 
