@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getTodayBrazilForInput } from '../../utils/dateHelper';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Supplier } from '../../types/database';
@@ -77,7 +78,7 @@ const InventoryItemForm: React.FC<InventoryItemFormProps> = ({
         notes: data.notes || null,
         next_action_date: data.next_action_date || null,
         supplier_id: data.supplier_id || null,
-        event_date: new Date().toISOString().split('T')[0],
+        event_date: getTodayBrazilForInput(),
       };
 
       let result;

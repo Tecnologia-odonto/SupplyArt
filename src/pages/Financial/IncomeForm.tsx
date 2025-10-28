@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getTodayBrazilForInput } from '../../utils/dateHelper';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Unit } from '../../types/database';
@@ -169,7 +170,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
         .upsert({
           unit_id: data.unit_id,
           budget_amount: amount,
-          period_start: new Date().toISOString().split('T')[0],
+          period_start: getTodayBrazilForInput(),
           period_end: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         }, {
           onConflict: 'unit_id,period_start,period_end',
@@ -183,7 +184,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
           .from('unit_budgets')
           .select('*')
           .eq('unit_id', data.unit_id)
-          .gte('period_end', new Date().toISOString().split('T')[0])
+          .gte('period_end', getTodayBrazilForInput())
           .single();
 
         if (existingBudget) {
@@ -199,7 +200,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
             .insert({
               unit_id: data.unit_id,
               budget_amount: amount,
-              period_start: new Date().toISOString().split('T')[0],
+              period_start: getTodayBrazilForInput(),
               period_end: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             });
         }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getTodayBrazilForInput } from '../../utils/dateHelper';
 import { CheckIcon, TrophyIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -168,7 +169,7 @@ const QuotationComparison: React.FC<QuotationComparisonProps> = ({ quotation, on
               supplier_id: selectedResponse.supplier_id,
               unit_price: selectedResponse.unit_price,
               quotation_id: quotation.id,
-              purchase_date: new Date().toISOString().split('T')[0]
+              purchase_date: getTodayBrazilForInput()
             });
 
           if (priceHistoryError) {

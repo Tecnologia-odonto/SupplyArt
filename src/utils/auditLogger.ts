@@ -1,83 +1,83 @@
 import { supabase } from '../lib/supabase';
 
-interface AuditLogData {
+interface AuditLogParams {
   action: string;
   tableName: string;
-  recordId?: string;
+  recordId: string;
   oldValues?: any;
   newValues?: any;
-  userId?: string;
+  details?: string;
 }
 
-export const createAuditLog = async ({
-  action,
-  tableName,
-  recordId,
-  oldValues,
-  newValues,
-  userId
-}: AuditLogData) => {
+export async function createAuditLog(params: AuditLogParams): Promise<void> {
+  const { action, tableName, recordId, oldValues, newValues, details } = params;
+
   try {
-    // Get current user if not provided
-    let currentUserId = userId;
-    if (!currentUserId) {
-      const { data: { user } } = await supabase.auth.getUser();
-      currentUserId = user?.id || null;
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      console.error('No user found for audit log');
+      return;
     }
 
-    await supabase.from('audit_logs').insert({
-      user_id: currentUserId,
+    const logEntry = {
+      user_id: user.id,
       action,
       table_name: tableName,
-      record_id: recordId || null,
+      record_id: recordId,
       old_values: oldValues || null,
-      new_values: newValues || null
-    });
-  } catch (error) {
-    console.error('Error creating audit log:', error);
-    // Don't throw error to avoid breaking the main operation
-  }
-};
+      new_values: newValues || null,
+      details: details || null,
+      created_at: new Date().toISOString()
+    };
 
-// Helper function to create movement logs
-export const createMovementLog = async (
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert(logEntry);
+
+    if (error) {
+      console.error('Error creating audit log:', error);
+    }
+  } catch (error) {
+    console.error('Exception creating audit log:', error);
+  }
+}
+
+export async function createMovementLog(
   itemId: string,
   fromUnitId: string,
   toUnitId: string,
   quantity: number,
-  type: 'stock_to_inventory' | 'inventory_to_stock' | 'transfer' | 'adjustment',
-  reference?: string
-) => {
+  movementType: string,
+  notes?: string
+): Promise<void> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
 
-    await supabase.from('movements').insert({
+    if (!user) {
+      console.error('No user found for movement log');
+      return;
+    }
+
+    const movementEntry = {
       item_id: itemId,
       from_unit_id: fromUnitId,
       to_unit_id: toUnitId,
       quantity,
-      type: type === 'stock_to_inventory' || type === 'inventory_to_stock' ? 'transfer' : type,
-      reference: reference || `${type.replace('_', ' ')} operation`,
-      notes: `Automated ${type.replace('_', ' ')} movement`,
-      created_by: user.id
-    });
+      movement_type: movementType,
+      notes: notes || null,
+      moved_by: user.id,
+      created_at: new Date().toISOString()
+    };
 
-    // Also create audit log
-    await createAuditLog({
-      action: 'MOVEMENT_CREATED',
-      tableName: 'movements',
-      newValues: {
-        item_id: itemId,
-        from_unit_id: fromUnitId,
-        to_unit_id: toUnitId,
-        quantity,
-        type,
-        reference,
-        timestamp: new Date().toISOString()
-      }
-    });
+    const { error } = await supabase
+      .from('stock_movements')
+      .insert(movementEntry);
+
+    if (error) {
+      console.error('Error creating movement log:', error);
+    }
   } catch (error) {
-    console.error('Error creating movement log:', error);
+    console.error('Exception creating movement log:', error);
   }
-};
+}

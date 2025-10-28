@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { formatDBDateForDisplay } from '../../utils/dateHelper';
+import { formatDBDateForDisplay, getTodayBrazilForInput} from '../../utils/dateHelper';
 import { 
   PlusIcon, 
   EyeIcon, 
@@ -363,8 +363,8 @@ const Requests: React.FC = () => {
             available_amount: supabase.raw(`available_amount - ${requestData.total_estimated_cost}`)
           })
           .eq('unit_id', requestData.requesting_unit_id)
-          .lte('period_start', new Date().toISOString().split('T')[0])
-          .gte('period_end', new Date().toISOString().split('T')[0]);
+          .lte('period_start', getTodayBrazilForInput())
+          .gte('period_end', getTodayBrazilForInput());
 
         if (budgetUpdateError) throw budgetUpdateError;
 

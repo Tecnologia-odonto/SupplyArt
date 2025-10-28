@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { formatDBDateForDisplay } from '../../utils/dateHelper';
+import { formatDBDateForDisplay, getTodayBrazilForInput } from '../../utils/dateHelper';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Purchase, Unit, Supplier, Item } from '../../types/database';
@@ -151,7 +151,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
 
   const fetchData = async () => {
     try {
-      const currentDate = new Date().toISOString().split('T')[0];
+      const currentDate = getTodayBrazilForInput();
+      console.log('📅 Fetching budgets for date:', currentDate);
       
       const [unitsResult, suppliersResult, itemsResult, budgetsResult] = await Promise.all([
         // Buscar apenas Centros de Distribuição
@@ -178,7 +179,9 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
       // Criar mapa de orçamentos disponíveis por unidade para o período atual
       const budgetMap: Record<string, UnitBudgetInfo> = {};
       if (budgetsResult.data) {
+        console.log('📊 Found budgets:', budgetsResult.data.length);
         budgetsResult.data.forEach(budget => {
+          console.log(`💰 Budget for unit ${budget.unit_id}: available=${budget.available_amount}, period=${budget.period_start} to ${budget.period_end}`);
           budgetMap[budget.unit_id] = {
             available_amount: budget.available_amount,
             period_start: budget.period_start,
@@ -187,6 +190,8 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
             used_amount: budget.used_amount
           };
         });
+      } else {
+        console.warn('⚠️ No budgets found for current date');
       }
       setUnitBudgets(budgetMap);
     } catch (error) {
@@ -267,14 +272,18 @@ const PurchaseForm: React.FC<PurchaseFormProps> = ({ purchase, onSave, onCancel 
   };
 
   const checkBudgetLimit = (unitId: string, amount: number) => {
+    console.log('📊 Checking budget limit for unit:', unitId, 'amount:', amount);
+    console.log('📊 Available budgets:', Object.keys(unitBudgets));
     const budgetInfo = unitBudgets[unitId];
     if (!budgetInfo) {
-      return { 
-        hasValidBudget: false, 
-        canPurchase: false, 
-        message: 'Unidade não possui orçamento definido para o período atual' 
+      console.error('❌ No budget found for unit:', unitId);
+      return {
+        hasValidBudget: false,
+        canPurchase: false,
+        message: 'Unidade não possui orçamento definido para o período atual'
       };
     }
+    console.log('✅ Budget found:', budgetInfo);
     
     const canPurchase = budgetInfo.available_amount >= amount;
     return { 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { formatDBDateForDisplay } from '../../utils/dateHelper';
+import { formatDBDateForDisplay, getTodayBrazilForInput} from '../../utils/dateHelper';
 import { DocumentTextIcon, EyeIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -35,7 +35,7 @@ const Logs: React.FC = () => {
     return date.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
+    return getTodayBrazilForInput();
   });
   const permissions = usePermissions();
 
@@ -238,7 +238,7 @@ const Logs: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
+              const today = getTodayBrazilForInput();
               setStartDate(today);
               setEndDate(today);
             }}
@@ -249,7 +249,7 @@ const Logs: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
+              const today = getTodayBrazilForInput();
               const lastWeek = new Date();
               lastWeek.setDate(lastWeek.getDate() - 7);
               setStartDate(lastWeek.toISOString().split('T')[0]);
@@ -262,7 +262,7 @@ const Logs: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              const today = new Date().toISOString().split('T')[0];
+              const today = getTodayBrazilForInput();
               const lastMonth = new Date();
               lastMonth.setMonth(lastMonth.getMonth() - 1);
               setStartDate(lastMonth.toISOString().split('T')[0]);

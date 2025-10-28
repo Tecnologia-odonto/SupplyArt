@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getTodayBrazilForInput } from '../../utils/dateHelper';
 import { useForm } from 'react-hook-form';
 import { supabase } from '../../lib/supabase';
 import { Request, Unit, Item } from '../../types/database';
@@ -535,8 +536,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   const fetchUnitBudget = async (unitId: string) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
+      const today = getTodayBrazilForInput();
+      console.log('📅 Fetching budget for unit:', unitId, 'on date:', today);
+
       const { data, error } = await supabase
         .from('unit_budgets')
         .select('*')
@@ -545,7 +547,17 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         .gte('period_end', today)
         .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error fetching budget:', error);
+        throw error;
+      }
+
+      if (data) {
+        console.log('✅ Budget found:', data);
+      } else {
+        console.warn('⚠️ No budget found for unit on this date');
+      }
+
       setUnitBudget(data);
     } catch (error) {
       console.error('Error fetching unit budget:', error);
@@ -612,18 +624,29 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
       return;
     }
 
+    // Calcular custo total (necessário tanto para novos quanto para atualizações)
+    const totalCost = getTotalEstimatedCost();
+
     // Verificar orçamento antes de criar o pedido
     if (isNewRequest) {
+      console.log('🔍 Checking budget for new request...');
+      console.log('Unit budget:', unitBudget);
+
       if (!unitBudget) {
+        console.error('❌ No budget configured');
         toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
         return;
       }
 
-      const totalCost = getTotalEstimatedCost();
+      console.log('💵 Total cost:', totalCost, 'Available:', unitBudget.available_amount);
+
       if (totalCost > unitBudget.available_amount) {
+        console.error('❌ Insufficient budget');
         toast.error(`Orçamento insuficiente. Custo estimado: R$ ${totalCost.toFixed(2)}, Disponível: R$ ${unitBudget.available_amount.toFixed(2)}`);
         return;
       }
+
+      console.log('✅ Budget check passed');
     }
 
     // Se estiver tentando mudar para "enviado", verificar estoque
@@ -777,7 +800,12 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   ];
 
   const getTotalEstimatedCost = () => {
-    return requestItems.reduce((total, item) => total + (item.estimated_total_price || 0), 0);
+    const total = requestItems.reduce((sum, item) => {
+      const itemTotal = item.estimated_total_price || 0;
+      return sum + itemTotal;
+    }, 0);
+    console.log('💰 Total estimated cost:', total, 'from', requestItems.length, 'items');
+    return total;
   };
 
   const totalEstimatedCost = getTotalEstimatedCost();

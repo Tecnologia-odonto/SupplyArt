@@ -17,10 +17,11 @@ import Modal from '../../components/UI/Modal';
 import Badge from '../../components/UI/Badge';
 import { supabase } from '../../lib/supabase';
 import { usePermissions } from '../../hooks/usePermissions';
-import { 
-  getCurrentDateBrazil, 
-  formatDateBrazil, 
+import {
+  getCurrentDateBrazil,
+  formatDateBrazil,
   formatDateForDisplay,
+  formatDBDateForDisplay,
   getFirstDayOfMonthBrazil,
   getDaysAgoBrazil,
   getDaysDifference,
