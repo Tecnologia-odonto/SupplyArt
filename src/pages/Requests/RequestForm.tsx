@@ -90,7 +90,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
   useEffect(() => {
     if (watchedRequestingUnitId) {
+      // Reset unitBudget quando trocar de unidade para evitar usar orçamento da unidade anterior
+      setUnitBudget(null);
       fetchUnitBudget(watchedRequestingUnitId);
+    } else {
+      setUnitBudget(null);
     }
   }, [watchedRequestingUnitId]);
 
@@ -559,18 +563,20 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
 
       if (error) {
         console.error('❌ Error fetching budget:', error);
-        throw error;
+        setUnitBudget(null);
+        return;
       }
 
       if (data) {
         console.log('✅ Budget found:', data);
+        setUnitBudget(data);
       } else {
         console.warn('⚠️ No budget found for unit on this date');
+        setUnitBudget(null);
       }
-
-      setUnitBudget(data);
     } catch (error) {
       console.error('Error fetching unit budget:', error);
+      setUnitBudget(null);
     }
   };
 
@@ -798,8 +804,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
   };
 
   const addItem = () => {
+    // Admin e Almoxarife não precisam de orçamento (editam pedidos de outras unidades)
+    const needsBudgetForAdd = !['admin', 'operador-almoxarife'].includes(profile?.role || '');
+
     // Verificar se a unidade tem orçamento antes de permitir adicionar itens
-    if (!unitBudget) {
+    if (needsBudgetForAdd && !unitBudget) {
       toast.error('Esta unidade não possui orçamento configurado. Configure o orçamento no módulo financeiro antes de fazer pedidos.');
       return;
     }
@@ -871,9 +880,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         return;
       }
 
-      console.log('💵 Total cost:', totalCost, 'Available:', unitBudget.available_amount);
+      console.log('💵 Total cost:', totalCost, 'Available:', unitBudget?.available_amount || 0);
 
-      if (totalCost > unitBudget.available_amount) {
+      if (unitBudget && totalCost > unitBudget.available_amount) {
         console.error('❌ Insufficient budget');
         toast.error(`Orçamento insuficiente. Custo estimado: R$ ${totalCost.toFixed(2)}, Disponível: R$ ${unitBudget.available_amount.toFixed(2)}`);
         return;
@@ -1133,8 +1142,8 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-yellow-800">Orçamento Insuficiente</h3>
                 <p className="text-sm text-yellow-700 mt-1">
-                  O custo estimado do pedido (R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) 
-                  excede o orçamento disponível da unidade (R$ {unitBudget.available_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+                  O custo estimado do pedido (R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                  excede o orçamento disponível da unidade (R$ {unitBudget?.available_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}).
                 </p>
               </div>
             </div>
@@ -1150,9 +1159,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-green-800">Orçamento Suficiente</h3>
                 <p className="text-sm text-green-700 mt-1">
-                  Orçamento disponível: R$ {unitBudget.available_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | 
-                  Custo do pedido: R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | 
-                  Restará: R$ {(unitBudget.available_amount - totalEstimatedCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  Orçamento disponível: R$ {unitBudget?.available_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'} |
+                  Custo do pedido: R$ {totalEstimatedCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
+                  Restará: R$ {((unitBudget?.available_amount || 0) - totalEstimatedCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
               </div>
             </div>

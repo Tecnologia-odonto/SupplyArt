@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Item, Unit } from '../../types/database';
 import Button from '../../components/UI/Button';
+import ItemSearchInput from '../../components/UI/ItemSearchInput';
 import toast from 'react-hot-toast';
 
 interface CDStockFormProps {
@@ -28,7 +29,7 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
   const [loading, setLoading] = useState(true);
   const { profile } = useAuth();
 
-  const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       item_id: stock?.item_id || '',
       cd_unit_id: stock?.cd_unit_id || profile?.unit_id || '',
@@ -40,6 +41,8 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
     }
   });
 
+  const watchedItemId = watch('item_id');
+
   const watchedQuantity = watch('quantity');
   const watchedMaxQuantity = watch('max_quantity');
 
@@ -50,8 +53,8 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
   const fetchData = async () => {
     try {
       const [itemsResult, cdUnitsResult] = await Promise.all([
-        supabase.from('items').select('*').order('name'),
-        profile?.role === 'operador-almoxarife' && profile.unit_id 
+        supabase.from('items').select('*').eq('show_in_company', true).order('name'),
+        profile?.role === 'operador-almoxarife' && profile.unit_id
           ? supabase.from('units').select('*').eq('id', profile.unit_id).eq('is_cd', true)
           : supabase.from('units').select('*').eq('is_cd', true).order('name')
       ]);
@@ -202,23 +205,19 @@ const CDStockForm: React.FC<CDStockFormProps> = ({ stock, onSave, onCancel }) =>
             <label htmlFor="item_id" className="block text-sm font-medium text-gray-700">
               Item *
             </label>
-            <select
-              id="item_id"
-              className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
-                errors.item_id ? 'border-error-300' : ''
-              }`}
-              {...register('item_id', { required: 'Item é obrigatório' })}
-            >
-              <option value="">Selecione um item</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} ({item.code})
-                </option>
-              ))}
-            </select>
-            {errors.item_id && (
-              <p className="mt-1 text-sm text-error-600">{errors.item_id.message}</p>
-            )}
+            <div className="mt-1">
+              <ItemSearchInput
+                items={items}
+                value={watchedItemId}
+                onChange={(itemId) => setValue('item_id', itemId, { shouldValidate: true })}
+                error={errors.item_id?.message}
+                placeholder="Digite o nome ou código do item..."
+              />
+              <input
+                type="hidden"
+                {...register('item_id', { required: 'Item é obrigatório' })}
+              />
+            </div>
           </div>
 
           <div>
