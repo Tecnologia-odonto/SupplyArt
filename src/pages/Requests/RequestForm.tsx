@@ -471,11 +471,19 @@ const RequestForm: React.FC<RequestFormProps> = ({ request, onSave, onCancel }) 
         
         console.log('🚚 Created em_rota record for item:', item.item_id);
 
-        // Subtrair do estoque do CD
+        // Subtrair do estoque do CD (garantir que não fique negativo)
+        const newQuantity = availableStock - quantityToSend;
+
+        if (newQuantity < 0) {
+          console.error(`❌ Stock would go negative for item ${item.item_id}: ${newQuantity}`);
+          toast.error(`Estoque insuficiente para ${itemData?.name}. Disponível: ${availableStock}, Solicitado: ${quantityToSend}`);
+          throw new Error(`Insufficient stock for item ${item.item_id}`);
+        }
+
         const { error: updateStockError } = await supabase
           .from('cd_stock')
           .update({
-            quantity: availableStock - quantityToSend
+            quantity: newQuantity
           })
           .eq('item_id', item.item_id)
           .eq('cd_unit_id', cdUnitId);

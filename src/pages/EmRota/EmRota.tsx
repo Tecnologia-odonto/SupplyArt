@@ -189,21 +189,43 @@ const EmRota: React.FC = () => {
   };
 
   const handleMarkAsDelivered = async (id: string, requestId: string | null) => {
-    if (!profile || !['admin', 'operador-almoxarife', 'operador-administrativo', 'gestor'].includes(profile.role)) {
-      toast.error('Você não tem permissão para marcar como entregue');
+    // Verificar permissões: Admin, Gestor da unidade, Op. Adm da unidade
+    if (!profile) {
+      toast.error('Usuário não autenticado');
       return;
     }
 
-    if (window.confirm('Confirmar que este item foi entregue na unidade?')) {
+    // Buscar dados do item em rota para verificar permissão
+    const { data: emRotaItem, error: fetchError } = await supabase
+      .from('em_rota')
+      .select('to_unit_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !emRotaItem) {
+      toast.error('Erro ao buscar dados do item');
+      return;
+    }
+
+    // Validar permissões: Admin OU (Gestor/Op.Adm da unidade de destino)
+    const isAdmin = profile.role === 'admin';
+    const isUnitManager = (profile.role === 'gestor' || profile.role === 'operador-administrativo') && profile.unit_id === emRotaItem.to_unit_id;
+
+    if (!isAdmin && !isUnitManager) {
+      toast.error('Você não tem permissão para confirmar o recebimento deste item. Apenas Admin, Gestor ou Op. Administrativo da unidade de destino podem confirmar.');
+      return;
+    }
+
+    if (window.confirm('Confirmar que este item foi entregue e recebido na unidade?')) {
       try {
-        // Buscar dados do item em rota antes de marcar como entregue
-        const { data: emRotaItem, error: fetchError } = await supabase
+        // Buscar dados completos do item em rota
+        const { data: emRotaItemFull, error: fetchFullError } = await supabase
           .from('em_rota')
           .select('*')
           .eq('id', id)
           .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchFullError) throw fetchFullError;
 
         // Marcar como entregue na tabela em_rota
         const { error: emRotaError } = await supabase
@@ -220,18 +242,20 @@ const EmRota: React.FC = () => {
         const { data: existingStock, error: stockCheckError } = await supabase
           .from('stock')
           .select('*')
-          .eq('item_id', emRotaItem.item_id)
-          .eq('unit_id', emRotaItem.to_unit_id)
+          .eq('item_id', emRotaItemFull.item_id)
+          .eq('unit_id', emRotaItemFull.to_unit_id)
           .maybeSingle();
 
         if (stockCheckError && stockCheckError.code !== 'PGRST116') throw stockCheckError;
 
         if (existingStock) {
-          // Atualizar estoque existente
+          // Atualizar estoque existente (garantir que não fique negativo)
+          const newQuantity = (existingStock.quantity || 0) + emRotaItemFull.quantity;
+
           const { error: updateStockError } = await supabase
             .from('stock')
             .update({
-              quantity: existingStock.quantity + emRotaItem.quantity
+              quantity: newQuantity
             })
             .eq('id', existingStock.id);
 
@@ -241,9 +265,9 @@ const EmRota: React.FC = () => {
           const { error: insertStockError } = await supabase
             .from('stock')
             .insert({
-              item_id: emRotaItem.item_id,
-              unit_id: emRotaItem.to_unit_id,
-              quantity: emRotaItem.quantity,
+              item_id: emRotaItemFull.item_id,
+              unit_id: emRotaItemFull.to_unit_id,
+              quantity: emRotaItemFull.quantity,
               location: 'Estoque Geral'
             });
 
@@ -251,22 +275,20 @@ const EmRota: React.FC = () => {
         }
 
         // Criar movimentação de entrega
-        if (profile) {
-          const { error: movementError } = await supabase
-            .from('movements')
-            .insert({
-              item_id: emRotaItem.item_id,
-              from_unit_id: emRotaItem.from_cd_unit_id,
-              to_unit_id: emRotaItem.to_unit_id,
-              quantity: emRotaItem.quantity,
-              type: 'transfer',
-              reference: `Entrega em rota - ID: ${id.slice(0, 8)}`,
-              notes: `Item entregue na unidade via sistema em rota`,
-              created_by: profile.id
-            });
+        const { error: movementError } = await supabase
+          .from('movements')
+          .insert({
+            item_id: emRotaItemFull.item_id,
+            from_unit_id: emRotaItemFull.from_cd_unit_id,
+            to_unit_id: emRotaItemFull.to_unit_id,
+            quantity: emRotaItemFull.quantity,
+            type: 'transfer',
+            reference: `Entrega em rota - ID: ${id.slice(0, 8)}`,
+            notes: `Item entregue e recebido na unidade via sistema em rota`,
+            created_by: profile.id
+          });
 
-          if (movementError) throw movementError;
-        }
+        if (movementError) throw movementError;
 
         // Se houver request_id, verificar se todos os itens foram entregues
         if (requestId) {
